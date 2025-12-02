@@ -4,7 +4,7 @@ use tui_textarea::Input;
 use crate::app::{AppState, FocusedPanel, InputMode};
 
 /// Handle a mouse event
-pub fn handle_mouse(state: &mut AppState, mouse: MouseEvent, page_size: usize) {
+pub fn handle_mouse(state: &mut AppState, mouse: MouseEvent, _page_size: usize) {
     match mouse.kind {
         MouseEventKind::ScrollUp => {
             for _ in 0..3 {

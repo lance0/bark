@@ -47,6 +47,12 @@
 - [x] Kubernetes pod log source (kubectl logs -f)
 - [x] SSH remote file tailing (ssh + tail -F)
 
+## Milestone 6: Themes ✅
+
+- [x] Themeable color system
+- [x] Built-in themes: default, kawaii, cyber, dracula, monochrome
+- [x] Theme selection via config file and environment variable
+
 ## Future Ideas
 
 - [ ] Multiple panes (split view)
@@ -56,5 +62,5 @@
 - [ ] Log correlation/linking between sources
 - [ ] Search history
 - [ ] Named bookmark groups
-- [ ] Custom color schemes
+- [ ] Custom theme definitions in config
 - [ ] Plugin system for custom sources

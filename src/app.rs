@@ -2,14 +2,13 @@ use std::collections::VecDeque;
 use std::fs::File;
 use std::io::Write;
 use std::time::Instant;
-use ansi_to_tui::IntoText;
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
 use ratatui::style::{Color, Style};
-use ratatui::text::{Line, Span, Text};
 use tui_textarea::TextArea;
 use crate::config::Config;
 use crate::filter::{ActiveFilter, MatchRange, SavedFilter};
 use crate::sources::LogSourceType;
+use crate::theme::Theme;
 
 /// Common timestamp formats to try parsing
 const TIMESTAMP_FORMATS: &[&str] = &[
@@ -112,17 +111,6 @@ impl LogLevel {
         }
     }
 
-    /// Get the color for this log level
-    pub fn color(&self) -> Option<Color> {
-        match self {
-            LogLevel::Error => Some(Color::Red),
-            LogLevel::Warn => Some(Color::Yellow),
-            LogLevel::Info => Some(Color::Green),
-            LogLevel::Debug => Some(Color::Blue),
-            LogLevel::Trace => Some(Color::DarkGray),
-            LogLevel::None => None,
-        }
-    }
 }
 
 /// A single log line with optional cached rendering
@@ -133,14 +121,10 @@ pub struct LogLine {
     pub level: LogLevel,
     /// Whether the line contains ANSI escape codes
     pub has_ansi: bool,
-    /// Cached rendered version with ANSI codes converted to styles
-    pub rendered: Option<Text<'static>>,
     /// Parsed timestamp from the line
     pub timestamp: Option<DateTime<Local>>,
     /// Whether this line is valid JSON
     pub is_json: bool,
-    /// Pretty-printed JSON (cached)
-    pub json_pretty: Option<String>,
 }
 
 impl LogLine {
@@ -149,7 +133,7 @@ impl LogLine {
         let has_ansi = raw.contains('\x1b');
         let timestamp = parse_timestamp(&raw);
         let is_json = Self::detect_json(&raw);
-        Self { raw, level, has_ansi, rendered: None, timestamp, is_json, json_pretty: None }
+        Self { raw, level, has_ansi, timestamp, is_json }
     }
 
     /// Detect if a line is JSON
@@ -162,53 +146,6 @@ impl LogLine {
     /// Get relative time string if timestamp is available
     pub fn relative_time(&self) -> Option<String> {
         self.timestamp.map(format_relative_time)
-    }
-
-    /// Get pretty-printed JSON, or None if not JSON
-    pub fn get_json_pretty(&mut self) -> Option<&str> {
-        if !self.is_json {
-            return None;
-        }
-
-        if self.json_pretty.is_none() {
-            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&self.raw) {
-                if let Ok(pretty) = serde_json::to_string_pretty(&value) {
-                    self.json_pretty = Some(pretty);
-                }
-            }
-        }
-
-        self.json_pretty.as_deref()
-    }
-
-    /// Get or create the rendered text, optionally applying level coloring
-    pub fn get_rendered(&mut self, apply_level_colors: bool) -> &Text<'static> {
-        if self.rendered.is_none() {
-            let text = if self.has_ansi {
-                // Line has ANSI codes - parse them
-                self.raw.as_bytes().into_text()
-                    .unwrap_or_else(|_| Text::raw(self.raw.clone()))
-            } else if apply_level_colors {
-                // No ANSI codes - apply level-based coloring
-                if let Some(color) = self.level.color() {
-                    Text::from(Line::from(Span::styled(
-                        self.raw.clone(),
-                        Style::default().fg(color),
-                    )))
-                } else {
-                    Text::raw(self.raw.clone())
-                }
-            } else {
-                Text::raw(self.raw.clone())
-            };
-            self.rendered = Some(text);
-        }
-        self.rendered.as_ref().unwrap()
-    }
-
-    /// Invalidate the cached render (e.g., when settings change)
-    pub fn invalidate_render(&mut self) {
-        self.rendered = None;
     }
 }
 
@@ -287,6 +224,8 @@ pub struct AppState<'a> {
     pub json_pretty: bool,
     /// Bookmarked line indices (into filtered_indices)
     pub bookmarks: Vec<usize>,
+    /// Active color theme
+    pub theme: Theme,
 }
 
 impl<'a> AppState<'a> {
@@ -324,6 +263,7 @@ impl<'a> AppState<'a> {
             show_relative_time: false,
             json_pretty: false,
             bookmarks: Vec::new(),
+            theme: config.get_theme(),
         }
     }
 
@@ -447,10 +387,6 @@ impl<'a> AppState<'a> {
     /// Toggle log level coloring
     pub fn toggle_level_colors(&mut self) {
         self.level_colors_enabled = !self.level_colors_enabled;
-        // Invalidate all cached renders
-        for line in &mut self.lines {
-            line.invalidate_render();
-        }
         self.status_message = Some(format!(
             "Level colors: {}",
             if self.level_colors_enabled { "on" } else { "off" }

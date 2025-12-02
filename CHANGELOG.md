@@ -38,6 +38,8 @@ All notable changes to Bark will be documented in this file.
 - **JSON log pretty-printing** - toggle with `J` to expand JSON logs
 - **Bookmarks** - mark lines with `m`, navigate with `[`/`]`
 - **Config file support** - `~/.config/bark/config.toml` for persistent settings
+- **Color themes** - 5 built-in themes: default, kawaii, cyber, dracula, monochrome
+  - Set via `theme` config option or `BARK_THEME` environment variable
 
 ### Technical
 - Async event loop using tokio
@@ -57,6 +59,7 @@ level_colors = true
 line_wrap = false
 show_side_panel = true
 export_dir = "/tmp"
+theme = "default"
 ```
 
 Environment variables (override config file):
@@ -65,3 +68,4 @@ Environment variables (override config file):
 - `BARK_LINE_WRAP` - Enable/disable line wrapping
 - `BARK_SIDE_PANEL` - Show/hide side panel
 - `BARK_EXPORT_DIR` - Directory for exported logs
+- `BARK_THEME` - Color theme (default, kawaii, cyber, dracula, monochrome)

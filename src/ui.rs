@@ -8,10 +8,23 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
 };
 
-use crate::app::{AppState, FocusedPanel, InputMode};
+use crate::app::{AppState, FocusedPanel, InputMode, LogLevel};
 use crate::filter::MatchRange;
+use crate::theme::Theme;
 
 const SIDE_PANEL_WIDTH: u16 = 24;
+
+/// Get color for a log level from the theme
+fn get_level_color(level: &LogLevel, theme: &Theme) -> Option<Color> {
+    match level {
+        LogLevel::Error => Some(theme.level_error),
+        LogLevel::Warn => Some(theme.level_warn),
+        LogLevel::Info => Some(theme.level_info),
+        LogLevel::Debug => Some(theme.level_debug),
+        LogLevel::Trace => Some(theme.level_trace),
+        LogLevel::None => None,
+    }
+}
 
 /// Apply horizontal scroll offset to a string, returning a substring
 fn apply_horizontal_scroll(text: &str, offset: usize) -> String {
@@ -59,14 +72,14 @@ fn apply_horizontal_scroll_to_line(line: &Line<'_>, offset: usize) -> Line<'stat
 }
 
 /// Apply match highlighting to a line, returning styled spans
-fn highlight_matches(text: &str, matches: &[MatchRange], base_style: Style) -> Line<'static> {
+fn highlight_matches(text: &str, matches: &[MatchRange], base_style: Style, theme: &Theme) -> Line<'static> {
     if matches.is_empty() {
         return Line::from(Span::styled(text.to_string(), base_style));
     }
 
     let highlight_style = Style::default()
-        .bg(Color::Yellow)
-        .fg(Color::Black)
+        .bg(theme.highlight_match_bg)
+        .fg(theme.highlight_match_fg)
         .add_modifier(Modifier::BOLD);
 
     let mut spans = Vec::new();
@@ -141,7 +154,7 @@ pub fn draw(frame: &mut Frame, state: &mut AppState) {
 
     // Draw help overlay if active
     if state.show_help {
-        draw_help_overlay(frame);
+        draw_help_overlay(frame, &state.theme);
     }
 }
 
@@ -163,9 +176,9 @@ fn draw_side_panel(frame: &mut Frame, state: &AppState, area: Rect) {
 fn draw_sources_panel(frame: &mut Frame, state: &AppState, area: Rect) {
     let focused = state.focused_panel == FocusedPanel::Sources;
     let border_style = if focused {
-        Style::default().fg(Color::Cyan)
+        Style::default().fg(state.theme.border_focused)
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(state.theme.border_unfocused)
     };
 
     let block = Block::default()
@@ -179,7 +192,7 @@ fn draw_sources_panel(frame: &mut Frame, state: &AppState, area: Rect) {
         .map(|(i, source)| {
             let prefix = if i == state.current_source_idx { "▶ " } else { "  " };
             let style = if i == state.current_source_idx {
-                Style::default().fg(Color::Green)
+                Style::default().fg(state.theme.source_current)
             } else {
                 Style::default()
             };
@@ -195,9 +208,9 @@ fn draw_sources_panel(frame: &mut Frame, state: &AppState, area: Rect) {
 fn draw_filters_panel(frame: &mut Frame, state: &AppState, area: Rect) {
     let focused = state.focused_panel == FocusedPanel::Filters;
     let border_style = if focused {
-        Style::default().fg(Color::Cyan)
+        Style::default().fg(state.theme.border_focused)
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(state.theme.border_unfocused)
     };
 
     let block = Block::default()
@@ -207,7 +220,7 @@ fn draw_filters_panel(frame: &mut Frame, state: &AppState, area: Rect) {
 
     if state.saved_filters.is_empty() {
         let msg = Paragraph::new("  (none)")
-            .style(Style::default().fg(Color::DarkGray))
+            .style(Style::default().fg(state.theme.empty_state))
             .block(block);
         frame.render_widget(msg, area);
     } else {
@@ -218,7 +231,7 @@ fn draw_filters_panel(frame: &mut Frame, state: &AppState, area: Rect) {
                 let prefix = if i == state.selected_filter_idx { "▶ " } else { "  " };
                 let indicator = if filter.is_regex { " [.*]" } else { "" };
                 let style = if i == state.selected_filter_idx {
-                    Style::default().fg(Color::Yellow)
+                    Style::default().fg(state.theme.filter_selected)
                 } else {
                     Style::default()
                 };
@@ -235,11 +248,11 @@ fn draw_filters_panel(frame: &mut Frame, state: &AppState, area: Rect) {
 fn draw_header(frame: &mut Frame, state: &AppState, area: Rect) {
     let source_name = state.current_source().name();
     let header = Paragraph::new(Line::from(vec![
-        Span::styled(" bark ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+        Span::styled(" bark ", Style::default().fg(state.theme.header_title).add_modifier(Modifier::BOLD)),
         Span::raw("| "),
-        Span::styled(source_name, Style::default().fg(Color::Cyan)),
+        Span::styled(source_name, Style::default().fg(state.theme.header_source)),
     ]))
-    .style(Style::default().bg(Color::DarkGray));
+    .style(Style::default().bg(state.theme.header_bg));
 
     frame.render_widget(header, area);
 }
@@ -248,9 +261,9 @@ fn draw_header(frame: &mut Frame, state: &AppState, area: Rect) {
 fn draw_log_view(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let focused = state.focused_panel == FocusedPanel::LogView;
     let border_style = if focused && state.show_side_panel {
-        Style::default().fg(Color::Cyan)
+        Style::default().fg(state.theme.border_focused)
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(state.theme.border_unfocused)
     };
 
     let block = Block::default()
@@ -272,6 +285,7 @@ fn draw_log_view(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let scroll_pos = state.scroll;
     let bookmarks = state.bookmarks.clone();
     let filtered_indices = state.filtered_indices.clone();
+    let theme = state.theme.clone();
     let visible = state.visible_lines(height);
 
     // Collect line data first (to avoid borrow issues)
@@ -282,10 +296,15 @@ fn draw_log_view(frame: &mut Frame, state: &mut AppState, area: Rect) {
         .map(|(visible_idx, (_scroll_idx, line))| {
             let actual_line_idx = filtered_indices.get(scroll_pos + visible_idx).copied().unwrap_or(0);
             let is_bookmarked = bookmarks.contains(&actual_line_idx);
+            let level_color = if level_colors {
+                get_level_color(&line.level, &theme)
+            } else {
+                None
+            };
             (
                 line.raw.clone(),
                 line.has_ansi,
-                if level_colors { line.level.color() } else { None },
+                level_color,
                 if show_relative { line.relative_time() } else { None },
                 line.is_json,
                 is_bookmarked,
@@ -318,7 +337,7 @@ fn draw_log_view(frame: &mut Frame, state: &mut AppState, area: Rect) {
 
         // Build bookmark prefix if bookmarked
         let bookmark_prefix: Option<Span> = if *is_bookmarked {
-            Some(Span::styled("* ", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)))
+            Some(Span::styled("* ", Style::default().fg(theme.bookmark).add_modifier(Modifier::BOLD)))
         } else {
             None
         };
@@ -328,7 +347,7 @@ fn draw_log_view(frame: &mut Frame, state: &mut AppState, area: Rect) {
             vec![
                 Span::styled(
                     format!("{:>8} ", rt),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(theme.timestamp),
                 ),
             ]
         });
@@ -398,8 +417,8 @@ fn draw_log_view(frame: &mut Frame, state: &mut AppState, area: Rect) {
             } else {
                 // No ANSI codes or multi-line JSON - we can safely apply highlighting
                 let base_style = if is_multiline {
-                    // JSON gets cyan coloring
-                    Style::default().fg(Color::Cyan)
+                    // JSON gets themed coloring
+                    Style::default().fg(theme.json)
                 } else {
                     level_color
                         .map(|c| Style::default().fg(c))
@@ -436,7 +455,7 @@ fn draw_log_view(frame: &mut Frame, state: &mut AppState, area: Rect) {
                     Vec::new() // No highlighting for pretty JSON lines
                 };
 
-                let mut highlighted_line = highlight_matches(&scrolled, &matches, base_style);
+                let mut highlighted_line = highlight_matches(&scrolled, &matches, base_style, &theme);
 
                 // Add prefixes (bookmark, time) - only on first line
                 if show_prefix {
@@ -493,11 +512,11 @@ fn draw_log_view(frame: &mut Frame, state: &mut AppState, area: Rect) {
     // Show "no lines" message if empty
     if total == 0 {
         let msg = Paragraph::new("Waiting for log lines...")
-            .style(Style::default().fg(Color::DarkGray));
+            .style(Style::default().fg(theme.empty_state));
         frame.render_widget(msg, inner);
     } else if filtered == 0 && state.active_filter.is_some() {
         let msg = Paragraph::new("No lines match the current filter")
-            .style(Style::default().fg(Color::Yellow));
+            .style(Style::default().fg(theme.warning_message));
         frame.render_widget(msg, inner);
     }
 }
@@ -552,14 +571,14 @@ fn draw_status_bar(frame: &mut Frame, state: &AppState, area: Rect) {
     let status = Line::from(vec![
         Span::styled(
             format!(" {} ", mode_str),
-            Style::default().bg(Color::Blue).fg(Color::White),
+            Style::default().bg(state.theme.status_mode_bg).fg(state.theme.status_mode_fg),
         ),
         Span::raw(format!(" {}/{} lines{}{} ", filtered, total, indicators_str, filter_str)),
-        Span::styled(help_text, Style::default().fg(Color::DarkGray)),
+        Span::styled(help_text, Style::default().fg(state.theme.status_help)),
     ]);
 
     let paragraph = Paragraph::new(status)
-        .style(Style::default().bg(Color::Black));
+        .style(Style::default().bg(state.theme.status_bg));
 
     frame.render_widget(paragraph, area);
 }
@@ -578,14 +597,14 @@ fn draw_filter_bar(frame: &mut Frame, state: &mut AppState, area: Rect) {
                 .split(area);
 
             let prefix = Paragraph::new("/")
-                .style(Style::default().fg(Color::Yellow));
+                .style(Style::default().fg(state.theme.filter_prefix));
             frame.render_widget(prefix, chunks[0]);
 
             frame.render_widget(&state.filter_textarea, chunks[1]);
         }
         _ => {
             if let Some(msg) = &state.status_message {
-                let content = Line::from(Span::styled(msg.as_str(), Style::default().fg(Color::Yellow)));
+                let content = Line::from(Span::styled(msg.as_str(), Style::default().fg(state.theme.warning_message)));
                 let paragraph = Paragraph::new(content);
                 frame.render_widget(paragraph, area);
             }
@@ -594,7 +613,7 @@ fn draw_filter_bar(frame: &mut Frame, state: &mut AppState, area: Rect) {
 }
 
 /// Draw the help overlay
-fn draw_help_overlay(frame: &mut Frame) {
+fn draw_help_overlay(frame: &mut Frame, theme: &Theme) {
     let area = frame.area();
 
     // Center the help box
@@ -643,8 +662,8 @@ fn draw_help_overlay(frame: &mut Frame) {
     let block = Block::default()
         .title(" Help ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan))
-        .style(Style::default().bg(Color::Black));
+        .border_style(Style::default().fg(theme.help_border))
+        .style(Style::default().bg(theme.help_bg));
 
     let paragraph = Paragraph::new(help_text).block(block);
     frame.render_widget(paragraph, help_area);

@@ -3,6 +3,7 @@ mod config;
 mod filter;
 mod input;
 mod sources;
+mod theme;
 mod ui;
 
 use std::io;

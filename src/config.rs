@@ -2,6 +2,8 @@ use std::fs;
 use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
+use crate::theme::Theme;
+
 /// Configuration for bark
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
@@ -16,6 +18,8 @@ pub struct Config {
     pub show_side_panel: bool,
     /// Default export directory
     pub export_dir: String,
+    /// Theme name: "default", "kawaii", "cyber", "dracula", "monochrome"
+    pub theme: String,
 }
 
 impl Default for Config {
@@ -26,6 +30,7 @@ impl Default for Config {
             line_wrap: false,
             show_side_panel: true,
             export_dir: "/tmp".to_string(),
+            theme: "default".to_string(),
         }
     }
 }
@@ -69,8 +74,16 @@ impl Config {
         if let Ok(val) = std::env::var("BARK_EXPORT_DIR") {
             config.export_dir = val;
         }
+        if let Ok(val) = std::env::var("BARK_THEME") {
+            config.theme = val;
+        }
 
         config
+    }
+
+    /// Get the resolved theme based on config
+    pub fn get_theme(&self) -> Theme {
+        Theme::by_name(&self.theme)
     }
 
     /// Save configuration to file

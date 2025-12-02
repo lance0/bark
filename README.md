@@ -18,6 +18,7 @@ A fast, keyboard-driven TUI for exploring logs from files, Docker containers, Ku
 - **Timestamp parsing**: View relative times ("5s ago", "2m ago")
 - **Export**: Save filtered lines to a file
 - **Configurable**: Persistent settings via config file or environment
+- **Themes**: Built-in color themes (default, kawaii, cyber, dracula, monochrome)
 
 ## Installation
 
@@ -111,6 +112,9 @@ show_side_panel = true
 
 # Directory for exported logs
 export_dir = "/tmp"
+
+# Color theme: default, kawaii, cyber, dracula, monochrome
+theme = "default"
 ```
 
 ### Environment Variables
@@ -122,6 +126,7 @@ Environment variables override config file settings:
 - `BARK_LINE_WRAP` - Enable line wrapping
 - `BARK_SIDE_PANEL` - Show side panel
 - `BARK_EXPORT_DIR` - Export directory
+- `BARK_THEME` - Color theme (default, kawaii, cyber, dracula, monochrome)
 
 ## Status Bar Indicators
 
