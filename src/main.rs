@@ -28,6 +28,8 @@ async fn main() -> Result<()> {
     if args.len() < 2 {
         eprintln!("Usage: bark <file_path>");
         eprintln!("       bark --docker <container_name>");
+        eprintln!("       bark --k8s <pod_name> [-n namespace] [-c container]");
+        eprintln!("       bark --ssh <host> <remote_path>");
         std::process::exit(1);
     }
 
@@ -40,6 +42,59 @@ async fn main() -> Result<()> {
         (
             LogSourceType::Docker { container: container.clone() },
             Box::new(sources::docker::DockerSource::new(container)),
+        )
+    } else if args[1] == "--k8s" {
+        if args.len() < 3 {
+            eprintln!("Usage: bark --k8s <pod_name> [-n namespace] [-c container]");
+            std::process::exit(1);
+        }
+        let pod = args[2].clone();
+        let mut namespace: Option<String> = None;
+        let mut container: Option<String> = None;
+
+        // Parse optional arguments
+        let mut i = 3;
+        while i < args.len() {
+            match args[i].as_str() {
+                "-n" | "--namespace" => {
+                    if i + 1 < args.len() {
+                        namespace = Some(args[i + 1].clone());
+                        i += 2;
+                    } else {
+                        eprintln!("Missing namespace after -n");
+                        std::process::exit(1);
+                    }
+                }
+                "-c" | "--container" => {
+                    if i + 1 < args.len() {
+                        container = Some(args[i + 1].clone());
+                        i += 2;
+                    } else {
+                        eprintln!("Missing container after -c");
+                        std::process::exit(1);
+                    }
+                }
+                _ => {
+                    eprintln!("Unknown argument: {}", args[i]);
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        (
+            LogSourceType::K8s { pod: pod.clone(), namespace: namespace.clone(), container: container.clone() },
+            Box::new(sources::k8s::K8sSource::new(pod, namespace, container)),
+        )
+    } else if args[1] == "--ssh" {
+        if args.len() < 4 {
+            eprintln!("Usage: bark --ssh <host> <remote_path>");
+            std::process::exit(1);
+        }
+        let host = args[2].clone();
+        let path = args[3].clone();
+        (
+            LogSourceType::Ssh { host: host.clone(), path: path.clone() },
+            Box::new(sources::ssh::SshSource::new(host, path)),
         )
     } else {
         let path = PathBuf::from(&args[1]);

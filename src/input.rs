@@ -95,6 +95,27 @@ fn handle_normal_mode(state: &mut AppState, key: KeyEvent, page_size: usize) {
             }
         }
 
+        // Horizontal scrolling (when line wrap is off)
+        KeyCode::Char('h') | KeyCode::Left => {
+            if state.focused_panel == FocusedPanel::LogView {
+                state.scroll_left();
+            }
+        }
+        KeyCode::Char('l') | KeyCode::Right => {
+            if state.focused_panel == FocusedPanel::LogView {
+                state.scroll_right();
+            }
+        }
+        KeyCode::Char('H') => {
+            state.scroll_left_large();
+        }
+        KeyCode::Char('L') => {
+            state.scroll_right_large();
+        }
+        KeyCode::Char('0') => {
+            state.scroll_home();
+        }
+
         // Enter to apply selected saved filter
         KeyCode::Enter => {
             if state.focused_panel == FocusedPanel::Filters && !state.saved_filters.is_empty() {
@@ -129,6 +150,39 @@ fn handle_normal_mode(state: &mut AppState, key: KeyEvent, page_size: usize) {
             state.toggle_regex_mode();
         }
 
+        // Next match
+        KeyCode::Char('n') => {
+            if state.active_filter.is_some() {
+                state.next_match();
+            } else {
+                state.status_message = Some("No active filter (use / to filter)".to_string());
+            }
+        }
+
+        // Previous match
+        KeyCode::Char('N') => {
+            if state.active_filter.is_some() {
+                state.prev_match();
+            } else {
+                state.status_message = Some("No active filter (use / to filter)".to_string());
+            }
+        }
+
+        // Toggle bookmark
+        KeyCode::Char('m') => {
+            state.toggle_bookmark();
+        }
+
+        // Next bookmark
+        KeyCode::Char(']') => {
+            state.next_bookmark();
+        }
+
+        // Previous bookmark
+        KeyCode::Char('[') => {
+            state.prev_bookmark();
+        }
+
         // Toggle line wrap
         KeyCode::Char('w') => {
             state.toggle_line_wrap();
@@ -137,6 +191,29 @@ fn handle_normal_mode(state: &mut AppState, key: KeyEvent, page_size: usize) {
         // Toggle level colors
         KeyCode::Char('c') => {
             state.toggle_level_colors();
+        }
+
+        // Toggle relative time display
+        KeyCode::Char('t') => {
+            state.toggle_relative_time();
+        }
+
+        // Toggle JSON pretty-printing
+        KeyCode::Char('J') => {
+            state.toggle_json_pretty();
+        }
+
+        // Export filtered lines to file
+        KeyCode::Char('e') => {
+            let path = state.default_export_path();
+            match state.export_lines(&path) {
+                Ok(count) => {
+                    state.status_message = Some(format!("Exported {} lines to {}", count, path));
+                }
+                Err(e) => {
+                    state.status_message = Some(format!("Export failed: {}", e));
+                }
+            }
         }
 
         // Save current filter

@@ -1,12 +1,85 @@
 use std::collections::VecDeque;
+use std::fs::File;
+use std::io::Write;
 use std::time::Instant;
 use ansi_to_tui::IntoText;
+use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span, Text};
 use tui_textarea::TextArea;
 use crate::config::Config;
-use crate::filter::{ActiveFilter, SavedFilter};
+use crate::filter::{ActiveFilter, MatchRange, SavedFilter};
 use crate::sources::LogSourceType;
+
+/// Common timestamp formats to try parsing
+const TIMESTAMP_FORMATS: &[&str] = &[
+    "%Y-%m-%dT%H:%M:%S%.fZ",          // ISO 8601 with Z
+    "%Y-%m-%dT%H:%M:%S%.f%:z",        // ISO 8601 with offset
+    "%Y-%m-%dT%H:%M:%S%:z",           // ISO 8601 without millis
+    "%Y-%m-%dT%H:%M:%S%.f",           // ISO 8601 no timezone
+    "%Y-%m-%dT%H:%M:%S",              // ISO 8601 basic
+    "%Y-%m-%d %H:%M:%S%.f",           // Common log format with millis
+    "%Y-%m-%d %H:%M:%S",              // Common log format
+    "%d/%b/%Y:%H:%M:%S %z",           // Apache/nginx combined
+    "%b %d %H:%M:%S",                 // Syslog format
+];
+
+/// Try to parse a timestamp from the beginning of a line
+fn parse_timestamp(line: &str) -> Option<DateTime<Local>> {
+    // Extract the first ~35 characters which should contain any timestamp
+    let prefix: String = line.chars().take(35).collect();
+
+    for fmt in TIMESTAMP_FORMATS {
+        // Try to parse with chrono
+        if let Ok(dt) = NaiveDateTime::parse_from_str(&prefix, fmt) {
+            return Some(Local.from_local_datetime(&dt).single()?);
+        }
+        // Try parsing with timezone info
+        if let Ok(dt) = DateTime::parse_from_str(&prefix, fmt) {
+            return Some(dt.with_timezone(&Local));
+        }
+    }
+
+    // Try to find a timestamp pattern anywhere in the first part of the line
+    // Look for ISO-like patterns
+    for word in prefix.split_whitespace().take(3) {
+        for fmt in TIMESTAMP_FORMATS {
+            if let Ok(dt) = NaiveDateTime::parse_from_str(word, fmt) {
+                return Some(Local.from_local_datetime(&dt).single()?);
+            }
+            if let Ok(dt) = DateTime::parse_from_str(word, fmt) {
+                return Some(dt.with_timezone(&Local));
+            }
+        }
+    }
+
+    None
+}
+
+/// Format a duration as human-readable relative time
+fn format_relative_time(dt: DateTime<Local>) -> String {
+    let now = Local::now();
+    let duration = now.signed_duration_since(dt);
+
+    if duration.num_seconds() < 0 {
+        return "future".to_string();
+    }
+
+    if duration.num_seconds() < 60 {
+        return format!("{}s ago", duration.num_seconds());
+    }
+    if duration.num_minutes() < 60 {
+        return format!("{}m ago", duration.num_minutes());
+    }
+    if duration.num_hours() < 24 {
+        return format!("{}h ago", duration.num_hours());
+    }
+    if duration.num_days() < 7 {
+        return format!("{}d ago", duration.num_days());
+    }
+
+    format!("{}w ago", duration.num_weeks())
+}
 
 /// Detected log level
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -62,13 +135,50 @@ pub struct LogLine {
     pub has_ansi: bool,
     /// Cached rendered version with ANSI codes converted to styles
     pub rendered: Option<Text<'static>>,
+    /// Parsed timestamp from the line
+    pub timestamp: Option<DateTime<Local>>,
+    /// Whether this line is valid JSON
+    pub is_json: bool,
+    /// Pretty-printed JSON (cached)
+    pub json_pretty: Option<String>,
 }
 
 impl LogLine {
     pub fn new(raw: String) -> Self {
         let level = LogLevel::detect(&raw);
         let has_ansi = raw.contains('\x1b');
-        Self { raw, level, has_ansi, rendered: None }
+        let timestamp = parse_timestamp(&raw);
+        let is_json = Self::detect_json(&raw);
+        Self { raw, level, has_ansi, rendered: None, timestamp, is_json, json_pretty: None }
+    }
+
+    /// Detect if a line is JSON
+    fn detect_json(line: &str) -> bool {
+        let trimmed = line.trim();
+        (trimmed.starts_with('{') && trimmed.ends_with('}'))
+            || (trimmed.starts_with('[') && trimmed.ends_with(']'))
+    }
+
+    /// Get relative time string if timestamp is available
+    pub fn relative_time(&self) -> Option<String> {
+        self.timestamp.map(format_relative_time)
+    }
+
+    /// Get pretty-printed JSON, or None if not JSON
+    pub fn get_json_pretty(&mut self) -> Option<&str> {
+        if !self.is_json {
+            return None;
+        }
+
+        if self.json_pretty.is_none() {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&self.raw) {
+                if let Ok(pretty) = serde_json::to_string_pretty(&value) {
+                    self.json_pretty = Some(pretty);
+                }
+            }
+        }
+
+        self.json_pretty.as_deref()
     }
 
     /// Get or create the rendered text, optionally applying level coloring
@@ -167,6 +277,16 @@ pub struct AppState<'a> {
     pub level_colors_enabled: bool,
     /// Whether to wrap long lines
     pub line_wrap: bool,
+    /// Horizontal scroll offset (in characters) - used when line_wrap is false
+    pub horizontal_scroll: usize,
+    /// Export directory for logs
+    pub export_dir: String,
+    /// Whether to show relative timestamps
+    pub show_relative_time: bool,
+    /// Whether to pretty-print JSON logs
+    pub json_pretty: bool,
+    /// Bookmarked line indices (into filtered_indices)
+    pub bookmarks: Vec<usize>,
 }
 
 impl<'a> AppState<'a> {
@@ -190,16 +310,138 @@ impl<'a> AppState<'a> {
             saved_filters: Vec::new(),
             selected_filter_idx: 0,
             focused_panel: FocusedPanel::LogView,
-            show_side_panel: true,
+            show_side_panel: config.show_side_panel,
             stick_to_bottom: true,
             should_quit: false,
             status_message: None,
             filter_last_change: None,
             filter_needs_recompute: false,
             show_help: false,
-            level_colors_enabled: true,  // Enabled by default
-            line_wrap: false,            // Disabled by default
+            level_colors_enabled: config.level_colors,
+            line_wrap: config.line_wrap,
+            horizontal_scroll: 0,
+            export_dir: config.export_dir.clone(),
+            show_relative_time: false,
+            json_pretty: false,
+            bookmarks: Vec::new(),
         }
+    }
+
+    /// Toggle bookmark at current scroll position
+    pub fn toggle_bookmark(&mut self) {
+        if self.filtered_indices.is_empty() {
+            return;
+        }
+
+        // Get the actual line index at current scroll position
+        let line_idx = self.filtered_indices[self.scroll];
+
+        if let Some(pos) = self.bookmarks.iter().position(|&b| b == line_idx) {
+            self.bookmarks.remove(pos);
+            self.status_message = Some("Bookmark removed".to_string());
+        } else {
+            self.bookmarks.push(line_idx);
+            self.bookmarks.sort_unstable();
+            self.status_message = Some("Bookmark added".to_string());
+        }
+    }
+
+    /// Jump to next bookmark
+    pub fn next_bookmark(&mut self) {
+        if self.bookmarks.is_empty() {
+            self.status_message = Some("No bookmarks".to_string());
+            return;
+        }
+
+        let current_line_idx = self.filtered_indices.get(self.scroll).copied().unwrap_or(0);
+
+        // Find next bookmark after current position
+        if let Some(&next_bookmark) = self.bookmarks.iter().find(|&&b| b > current_line_idx) {
+            // Find this bookmark in filtered_indices
+            if let Some(scroll_pos) = self.filtered_indices.iter().position(|&i| i == next_bookmark) {
+                self.scroll = scroll_pos;
+                self.stick_to_bottom = false;
+                self.status_message = Some(format!(
+                    "Bookmark {}/{}",
+                    self.bookmarks.iter().position(|&b| b == next_bookmark).unwrap() + 1,
+                    self.bookmarks.len()
+                ));
+                return;
+            }
+        }
+
+        // Wrap around to first bookmark
+        if let Some(&first_bookmark) = self.bookmarks.first() {
+            if let Some(scroll_pos) = self.filtered_indices.iter().position(|&i| i == first_bookmark) {
+                self.scroll = scroll_pos;
+                self.stick_to_bottom = false;
+                self.status_message = Some(format!(
+                    "Bookmark 1/{} (wrapped)",
+                    self.bookmarks.len()
+                ));
+            }
+        }
+    }
+
+    /// Jump to previous bookmark
+    pub fn prev_bookmark(&mut self) {
+        if self.bookmarks.is_empty() {
+            self.status_message = Some("No bookmarks".to_string());
+            return;
+        }
+
+        let current_line_idx = self.filtered_indices.get(self.scroll).copied().unwrap_or(0);
+
+        // Find previous bookmark before current position
+        if let Some(&prev_bookmark) = self.bookmarks.iter().rev().find(|&&b| b < current_line_idx) {
+            // Find this bookmark in filtered_indices
+            if let Some(scroll_pos) = self.filtered_indices.iter().position(|&i| i == prev_bookmark) {
+                self.scroll = scroll_pos;
+                self.stick_to_bottom = false;
+                self.status_message = Some(format!(
+                    "Bookmark {}/{}",
+                    self.bookmarks.iter().position(|&b| b == prev_bookmark).unwrap() + 1,
+                    self.bookmarks.len()
+                ));
+                return;
+            }
+        }
+
+        // Wrap around to last bookmark
+        if let Some(&last_bookmark) = self.bookmarks.last() {
+            if let Some(scroll_pos) = self.filtered_indices.iter().position(|&i| i == last_bookmark) {
+                self.scroll = scroll_pos;
+                self.stick_to_bottom = false;
+                self.status_message = Some(format!(
+                    "Bookmark {}/{} (wrapped)",
+                    self.bookmarks.len(),
+                    self.bookmarks.len()
+                ));
+            }
+        }
+    }
+
+    /// Check if a line index is bookmarked
+    pub fn is_bookmarked(&self, line_idx: usize) -> bool {
+        self.bookmarks.contains(&line_idx)
+    }
+
+    /// Toggle JSON pretty-printing
+    pub fn toggle_json_pretty(&mut self) {
+        self.json_pretty = !self.json_pretty;
+        self.status_message = Some(format!(
+            "JSON pretty-print: {}",
+            if self.json_pretty { "on" } else { "off" }
+        ));
+    }
+
+    /// Toggle relative timestamp display
+    pub fn toggle_relative_time(&mut self) {
+        self.show_relative_time = !self.show_relative_time;
+        self.status_message = Some(format!(
+            "Relative time: {}",
+            if self.show_relative_time { "on" } else { "off" }
+        ));
     }
 
     /// Toggle log level coloring
@@ -218,10 +460,68 @@ impl<'a> AppState<'a> {
     /// Toggle line wrapping
     pub fn toggle_line_wrap(&mut self) {
         self.line_wrap = !self.line_wrap;
+        // Reset horizontal scroll when enabling wrapping
+        if self.line_wrap {
+            self.horizontal_scroll = 0;
+        }
         self.status_message = Some(format!(
             "Line wrap: {}",
             if self.line_wrap { "on" } else { "off" }
         ));
+    }
+
+    /// Scroll left (when line wrap is off)
+    pub fn scroll_left(&mut self) {
+        if !self.line_wrap && self.horizontal_scroll > 0 {
+            self.horizontal_scroll = self.horizontal_scroll.saturating_sub(4);
+        }
+    }
+
+    /// Scroll right (when line wrap is off)
+    pub fn scroll_right(&mut self) {
+        if !self.line_wrap {
+            self.horizontal_scroll += 4;
+        }
+    }
+
+    /// Scroll left by a larger amount
+    pub fn scroll_left_large(&mut self) {
+        if !self.line_wrap && self.horizontal_scroll > 0 {
+            self.horizontal_scroll = self.horizontal_scroll.saturating_sub(20);
+        }
+    }
+
+    /// Scroll right by a larger amount
+    pub fn scroll_right_large(&mut self) {
+        if !self.line_wrap {
+            self.horizontal_scroll += 20;
+        }
+    }
+
+    /// Reset horizontal scroll to beginning
+    pub fn scroll_home(&mut self) {
+        self.horizontal_scroll = 0;
+    }
+
+    /// Export filtered (or all) lines to a file
+    pub fn export_lines(&self, path: &str) -> Result<usize, String> {
+        let mut file = File::create(path).map_err(|e| e.to_string())?;
+
+        let mut count = 0;
+        for &idx in &self.filtered_indices {
+            if let Some(line) = self.lines.get(idx) {
+                writeln!(file, "{}", line.raw).map_err(|e| e.to_string())?;
+                count += 1;
+            }
+        }
+
+        Ok(count)
+    }
+
+    /// Generate default export filename
+    pub fn default_export_path(&self) -> String {
+        let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
+        format!("{}/bark_export_{}.log", self.export_dir, timestamp)
     }
 
     /// Get the current source
@@ -376,6 +676,65 @@ impl<'a> AppState<'a> {
             self.scroll = self.filtered_indices.len() - 1;
         }
         self.stick_to_bottom = true;
+    }
+
+    /// Go to next matching line (when filter is active)
+    pub fn next_match(&mut self) {
+        if self.filtered_indices.is_empty() {
+            return;
+        }
+        if self.scroll < self.filtered_indices.len() - 1 {
+            self.scroll += 1;
+            self.stick_to_bottom = false;
+            self.status_message = Some(format!(
+                "Match {}/{}",
+                self.scroll + 1,
+                self.filtered_indices.len()
+            ));
+        } else {
+            // Wrap to beginning
+            self.scroll = 0;
+            self.stick_to_bottom = false;
+            self.status_message = Some(format!(
+                "Match {}/{} (wrapped)",
+                self.scroll + 1,
+                self.filtered_indices.len()
+            ));
+        }
+    }
+
+    /// Go to previous matching line (when filter is active)
+    pub fn prev_match(&mut self) {
+        if self.filtered_indices.is_empty() {
+            return;
+        }
+        if self.scroll > 0 {
+            self.scroll -= 1;
+            self.stick_to_bottom = false;
+            self.status_message = Some(format!(
+                "Match {}/{}",
+                self.scroll + 1,
+                self.filtered_indices.len()
+            ));
+        } else {
+            // Wrap to end
+            self.scroll = self.filtered_indices.len() - 1;
+            self.stick_to_bottom = false;
+            self.status_message = Some(format!(
+                "Match {}/{} (wrapped)",
+                self.scroll + 1,
+                self.filtered_indices.len()
+            ));
+        }
+    }
+
+    /// Get match ranges for a line (for highlighting)
+    pub fn get_match_ranges(&self, line: &str) -> Vec<MatchRange> {
+        if let Some(ref filter) = self.active_filter {
+            filter.find_matches(line)
+        } else {
+            Vec::new()
+        }
     }
 
     /// Get the current filter input text

@@ -1,5 +1,7 @@
 pub mod file;
 pub mod docker;
+pub mod k8s;
+pub mod ssh;
 
 use std::path::PathBuf;
 use tokio::sync::mpsc;
@@ -10,6 +12,8 @@ use crate::app::LogLine;
 pub enum LogSourceType {
     File { path: PathBuf },
     Docker { container: String },
+    K8s { pod: String, namespace: Option<String>, container: Option<String> },
+    Ssh { host: String, path: String },
 }
 
 impl LogSourceType {
@@ -20,7 +24,16 @@ impl LogSourceType {
                     .map(|s| s.to_string_lossy().to_string())
                     .unwrap_or_else(|| path.display().to_string())
             }
-            LogSourceType::Docker { container } => container.clone(),
+            LogSourceType::Docker { container } => format!("docker:{}", container),
+            LogSourceType::K8s { pod, namespace, container } => {
+                match (namespace, container) {
+                    (Some(ns), Some(c)) => format!("k8s:{}/{}/{}", ns, pod, c),
+                    (Some(ns), None) => format!("k8s:{}/{}", ns, pod),
+                    (None, Some(c)) => format!("k8s:{}/{}", pod, c),
+                    (None, None) => format!("k8s:{}", pod),
+                }
+            }
+            LogSourceType::Ssh { host, path } => format!("ssh:{}:{}", host, path),
         }
     }
 }

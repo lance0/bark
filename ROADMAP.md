@@ -27,25 +27,34 @@
 - [x] Saved filters (save with `s`, apply with `Enter`, delete with `x`)
 - [x] Filter quick-select from saved list
 - [x] Help overlay (`?` key)
-- [ ] Config file support (~/.config/bark/config.toml) - deferred to future
-- [ ] Multiple source switching at runtime - deferred to future
+- [x] Config file support (~/.config/bark/config.toml)
 
-## Quick Wins ✅
+## Milestone 4: Enhanced Features ✅
 
-- [x] Log level detection and coloring (`c` to toggle)
-- [x] Line wrapping toggle (`w` to toggle)
+- [x] Search highlighting (matched text highlighted in yellow)
+- [x] Match navigation (n/N for next/prev match)
+- [x] Horizontal scrolling (h/l, H/L, 0 for line start)
+- [x] Export filtered lines to file (e key)
+- [x] Log level detection and coloring (c to toggle)
+- [x] Line wrapping toggle (w to toggle)
 - [x] Mouse wheel scrolling
+- [x] Timestamp parsing and relative time display (t to toggle)
+- [x] JSON log pretty-printing (J to toggle)
+- [x] Bookmarks (m to toggle, [/] to navigate)
+
+## Milestone 5: Multiple Sources ✅
+
+- [x] Kubernetes pod log source (kubectl logs -f)
+- [x] SSH remote file tailing (ssh + tail -F)
 
 ## Future Ideas
 
-- [ ] Timestamp parsing and relative time display
-- [ ] Bookmarks for specific log lines
-- [ ] Search within current view (n/N for next/prev match)
-- [ ] Export visible/filtered lines to file
-- [ ] Horizontal scrolling for long lines
-- [ ] JSON log pretty-printing
-- [ ] Kubernetes pod log source
-- [ ] SSH remote file tailing
 - [ ] Multiple panes (split view)
-- [ ] Config file support (~/.config/bark/config.toml)
 - [ ] Multiple source switching at runtime
+- [ ] Kubernetes pod selector UI
+- [ ] Log aggregation from multiple sources
+- [ ] Log correlation/linking between sources
+- [ ] Search history
+- [ ] Named bookmark groups
+- [ ] Custom color schemes
+- [ ] Plugin system for custom sources
