@@ -389,9 +389,7 @@ fn draw_pane(frame: &mut Frame, state: &mut AppState, pane_idx: usize, area: Rec
         Borders::NONE
     };
 
-    let block = Block::default()
-        .borders(borders)
-        .border_style(border_style);
+    let block = Block::default().borders(borders).border_style(border_style);
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -489,11 +487,24 @@ fn draw_pane(frame: &mut Frame, state: &mut AppState, pane_idx: usize, area: Rec
     // Get selected line for highlighting
     let selected_line = state.panes[pane_idx].selected_line;
 
-    for (idx, (raw, has_ansi, level_color, relative_time, _is_json, is_bookmarked, source_id, line_number)) in
-        line_data.iter().enumerate()
+    for (
+        idx,
+        (
+            raw,
+            has_ansi,
+            level_color,
+            relative_time,
+            _is_json,
+            is_bookmarked,
+            source_id,
+            line_number,
+        ),
+    ) in line_data.iter().enumerate()
     {
         // Check if this line is selected
-        let is_selected = selected_line.map(|sel| sel == scroll_pos + idx).unwrap_or(false);
+        let is_selected = selected_line
+            .map(|sel| sel == scroll_pos + idx)
+            .unwrap_or(false);
         // Check if we have pretty JSON for this line
         let display_text = json_cache
             .get(idx)
@@ -749,7 +760,8 @@ fn draw_pane(frame: &mut Frame, state: &mut AppState, pane_idx: usize, area: Rec
             .begin_symbol(Some("▲"))
             .end_symbol(Some("▼"));
 
-        let mut scrollbar_state = ScrollbarState::new(filtered).position(state.panes[pane_idx].scroll);
+        let mut scrollbar_state =
+            ScrollbarState::new(filtered).position(state.panes[pane_idx].scroll);
 
         frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
     }
@@ -777,8 +789,16 @@ fn draw_status_bar(frame: &mut Frame, state: &AppState, area: Rect) {
         InputMode::SplitCommand => "SPLIT",
     };
 
-    let follow_indicator = if state.panes[state.active_pane].stick_to_bottom { "[F]" } else { "[P]" };
-    let regex_indicator = if state.panes[state.active_pane].filter_is_regex { "[.*]" } else { "" };
+    let follow_indicator = if state.panes[state.active_pane].stick_to_bottom {
+        "[F]"
+    } else {
+        "[P]"
+    };
+    let regex_indicator = if state.panes[state.active_pane].filter_is_regex {
+        "[.*]"
+    } else {
+        ""
+    };
     let wrap_indicator = if state.line_wrap { "[W]" } else { "" };
     let color_indicator = if state.level_colors_enabled {
         "[C]"
@@ -787,11 +807,12 @@ fn draw_status_bar(frame: &mut Frame, state: &AppState, area: Rect) {
     };
     let time_indicator = if state.show_relative_time { "[T]" } else { "" };
     let json_indicator = if state.json_pretty { "[J]" } else { "" };
-    let hscroll_indicator = if !state.line_wrap && state.panes[state.active_pane].horizontal_scroll > 0 {
-        format!("[+{}]", state.panes[state.active_pane].horizontal_scroll)
-    } else {
-        String::new()
-    };
+    let hscroll_indicator =
+        if !state.line_wrap && state.panes[state.active_pane].horizontal_scroll > 0 {
+            format!("[+{}]", state.panes[state.active_pane].horizontal_scroll)
+        } else {
+            String::new()
+        };
     // Throughput indicator - show lines/sec when receiving logs
     let throughput_indicator = if state.lines_per_second > 0 {
         format!("[{}/s]", state.lines_per_second)
@@ -1093,8 +1114,7 @@ fn draw_picker_overlay(frame: &mut Frame, state: &AppState) {
 
     // Handle loading state
     if picker.loading {
-        let loading = Paragraph::new("  Loading...")
-            .style(Style::default().fg(theme.empty_state));
+        let loading = Paragraph::new("  Loading...").style(Style::default().fg(theme.empty_state));
         frame.render_widget(loading, inner);
         return;
     }
@@ -1104,7 +1124,9 @@ fn draw_picker_overlay(frame: &mut Frame, state: &AppState) {
         let err_lines = vec![
             Line::from(Span::styled(
                 "Error:",
-                Style::default().fg(theme.level_error).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme.level_error)
+                    .add_modifier(Modifier::BOLD),
             )),
             Line::from(error.as_str()),
             Line::from(""),

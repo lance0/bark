@@ -72,7 +72,10 @@ impl LogSource for DockerSource {
                                     Ok(None) => break,
                                     Err(e) => {
                                         let _ = tx_stderr
-                                            .send(LogEvent::Error(format!("stderr read error: {}", e)))
+                                            .send(LogEvent::Error(format!(
+                                                "stderr read error: {}",
+                                                e
+                                            )))
                                             .await;
                                         // Continue reading
                                     }

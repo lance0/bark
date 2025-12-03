@@ -6,12 +6,12 @@
 //! - Bookmarks and navigation state
 //! - UI mode and panel focus
 
-use arboard::{Clipboard, Error as ClipboardError};
 use crate::config::{Config, FILTER_DEBOUNCE_MS};
 use crate::discovery::DiscoveredSource;
 use crate::filter::{ActiveFilter, MatchRange, SavedFilter};
 use crate::sources::LogSourceType;
 use crate::theme::Theme;
+use arboard::{Clipboard, Error as ClipboardError};
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
@@ -281,20 +281,26 @@ impl PickerState {
     }
 
     /// Set discovered sources, marking any that match existing sources as already checked
-    pub fn set_sources(&mut self, sources: Vec<DiscoveredSource>, existing_sources: &[LogSourceType]) {
+    pub fn set_sources(
+        &mut self,
+        sources: Vec<DiscoveredSource>,
+        existing_sources: &[LogSourceType],
+    ) {
         self.checked = sources
             .iter()
             .map(|discovered| {
                 // Check if this discovered source already exists in the app
-                existing_sources.iter().any(|existing| match (existing, self.mode) {
-                    (LogSourceType::Docker { container }, PickerMode::Docker) => {
-                        container == &discovered.name
-                    }
-                    (LogSourceType::K8s { pod, namespace, .. }, PickerMode::K8s) => {
-                        pod == &discovered.name && *namespace == discovered.namespace
-                    }
-                    _ => false,
-                })
+                existing_sources
+                    .iter()
+                    .any(|existing| match (existing, self.mode) {
+                        (LogSourceType::Docker { container }, PickerMode::Docker) => {
+                            container == &discovered.name
+                        }
+                        (LogSourceType::K8s { pod, namespace, .. }, PickerMode::K8s) => {
+                            pod == &discovered.name && *namespace == discovered.namespace
+                        }
+                        _ => false,
+                    })
             })
             .collect();
         // Save initial state to detect removals later
@@ -344,7 +350,6 @@ impl PickerState {
             *checked = !*checked;
         }
     }
-
 }
 
 /// State for the settings overlay
@@ -486,7 +491,6 @@ impl<'a> PaneState<'a> {
             selected_line: None, // Don't copy selection to new pane
         }
     }
-
 }
 
 /// Main application state
@@ -728,9 +732,14 @@ impl<'a> AppState<'a> {
         }
 
         // Get the actual line index at current scroll position
-        let line_idx = self.panes[self.active_pane].filtered_indices[self.panes[self.active_pane].scroll];
+        let line_idx =
+            self.panes[self.active_pane].filtered_indices[self.panes[self.active_pane].scroll];
 
-        if let Some(pos) = self.panes[self.active_pane].bookmarks.iter().position(|&b| b == line_idx) {
+        if let Some(pos) = self.panes[self.active_pane]
+            .bookmarks
+            .iter()
+            .position(|&b| b == line_idx)
+        {
             self.panes[self.active_pane].bookmarks.remove(pos);
             self.status_message = Some("Bookmark removed".to_string());
         } else {
@@ -747,10 +756,18 @@ impl<'a> AppState<'a> {
             return;
         }
 
-        let current_line_idx = self.panes[self.active_pane].filtered_indices.get(self.panes[self.active_pane].scroll).copied().unwrap_or(0);
+        let current_line_idx = self.panes[self.active_pane]
+            .filtered_indices
+            .get(self.panes[self.active_pane].scroll)
+            .copied()
+            .unwrap_or(0);
 
         // Find next bookmark after current position
-        if let Some(&next_bookmark) = self.panes[self.active_pane].bookmarks.iter().find(|&&b| b > current_line_idx) {
+        if let Some(&next_bookmark) = self.panes[self.active_pane]
+            .bookmarks
+            .iter()
+            .find(|&&b| b > current_line_idx)
+        {
             // Find this bookmark in filtered_indices
             if let Some(scroll_pos) = self.panes[self.active_pane]
                 .filtered_indices
@@ -761,7 +778,8 @@ impl<'a> AppState<'a> {
                 self.panes[self.active_pane].stick_to_bottom = false;
                 self.status_message = Some(format!(
                     "Bookmark {}/{}",
-                    self.panes[self.active_pane].bookmarks
+                    self.panes[self.active_pane]
+                        .bookmarks
                         .iter()
                         .position(|&b| b == next_bookmark)
                         .unwrap()
@@ -781,8 +799,10 @@ impl<'a> AppState<'a> {
             {
                 self.panes[self.active_pane].scroll = scroll_pos;
                 self.panes[self.active_pane].stick_to_bottom = false;
-                self.status_message =
-                    Some(format!("Bookmark 1/{} (wrapped)", self.panes[self.active_pane].bookmarks.len()));
+                self.status_message = Some(format!(
+                    "Bookmark 1/{} (wrapped)",
+                    self.panes[self.active_pane].bookmarks.len()
+                ));
             }
         }
     }
@@ -794,10 +814,19 @@ impl<'a> AppState<'a> {
             return;
         }
 
-        let current_line_idx = self.panes[self.active_pane].filtered_indices.get(self.panes[self.active_pane].scroll).copied().unwrap_or(0);
+        let current_line_idx = self.panes[self.active_pane]
+            .filtered_indices
+            .get(self.panes[self.active_pane].scroll)
+            .copied()
+            .unwrap_or(0);
 
         // Find previous bookmark before current position
-        if let Some(&prev_bookmark) = self.panes[self.active_pane].bookmarks.iter().rev().find(|&&b| b < current_line_idx) {
+        if let Some(&prev_bookmark) = self.panes[self.active_pane]
+            .bookmarks
+            .iter()
+            .rev()
+            .find(|&&b| b < current_line_idx)
+        {
             // Find this bookmark in filtered_indices
             if let Some(scroll_pos) = self.panes[self.active_pane]
                 .filtered_indices
@@ -808,7 +837,8 @@ impl<'a> AppState<'a> {
                 self.panes[self.active_pane].stick_to_bottom = false;
                 self.status_message = Some(format!(
                     "Bookmark {}/{}",
-                    self.panes[self.active_pane].bookmarks
+                    self.panes[self.active_pane]
+                        .bookmarks
                         .iter()
                         .position(|&b| b == prev_bookmark)
                         .unwrap()
@@ -965,7 +995,9 @@ impl<'a> AppState<'a> {
     fn set_filter_text(&mut self, text: &str) {
         self.panes[self.active_pane].filter_textarea.select_all();
         self.panes[self.active_pane].filter_textarea.cut();
-        self.panes[self.active_pane].filter_textarea.insert_str(text);
+        self.panes[self.active_pane]
+            .filter_textarea
+            .insert_str(text);
     }
 
     /// Get the raw text of the selected line (if any) or the line at scroll position
@@ -997,8 +1029,17 @@ impl<'a> AppState<'a> {
 
     /// Available theme names in cycle order
     const THEMES: &'static [&'static str] = &[
-        "default", "kawaii", "cyber", "dracula", "monochrome",
-        "matrix", "nord", "gruvbox", "catppuccin", "tokyo_night", "solarized",
+        "default",
+        "kawaii",
+        "cyber",
+        "dracula",
+        "monochrome",
+        "matrix",
+        "nord",
+        "gruvbox",
+        "catppuccin",
+        "tokyo_night",
+        "solarized",
     ];
 
     /// Cycle to the next theme
@@ -1037,7 +1078,11 @@ impl<'a> AppState<'a> {
                 self.level_colors_enabled = !self.level_colors_enabled;
                 self.status_message = Some(format!(
                     "Level colors: {}",
-                    if self.level_colors_enabled { "on" } else { "off" }
+                    if self.level_colors_enabled {
+                        "on"
+                    } else {
+                        "off"
+                    }
                 ));
             }
             2 => {
@@ -1068,7 +1113,9 @@ impl<'a> AppState<'a> {
     /// Scroll left (when line wrap is off)
     pub fn scroll_left(&mut self) {
         if !self.line_wrap && self.panes[self.active_pane].horizontal_scroll > 0 {
-            self.panes[self.active_pane].horizontal_scroll = self.panes[self.active_pane].horizontal_scroll.saturating_sub(4);
+            self.panes[self.active_pane].horizontal_scroll = self.panes[self.active_pane]
+                .horizontal_scroll
+                .saturating_sub(4);
         }
     }
 
@@ -1082,7 +1129,9 @@ impl<'a> AppState<'a> {
     /// Scroll left by a larger amount
     pub fn scroll_left_large(&mut self) {
         if !self.line_wrap && self.panes[self.active_pane].horizontal_scroll > 0 {
-            self.panes[self.active_pane].horizontal_scroll = self.panes[self.active_pane].horizontal_scroll.saturating_sub(20);
+            self.panes[self.active_pane].horizontal_scroll = self.panes[self.active_pane]
+                .horizontal_scroll
+                .saturating_sub(20);
         }
     }
 
@@ -1151,7 +1200,9 @@ impl<'a> AppState<'a> {
             let name = saved.name.clone();
 
             self.panes[self.active_pane].filter_textarea = TextArea::new(vec![pattern.clone()]);
-            self.panes[self.active_pane].filter_textarea.set_cursor_line_style(Style::default());
+            self.panes[self.active_pane]
+                .filter_textarea
+                .set_cursor_line_style(Style::default());
             self.panes[self.active_pane].filter_is_regex = is_regex;
             self.panes[self.active_pane].active_filter = Some(ActiveFilter::new(pattern, is_regex));
             self.recompute_filter();
@@ -1335,7 +1386,9 @@ impl<'a> AppState<'a> {
 
         // Adjust scroll if it's now out of bounds
         if !self.panes[self.active_pane].filtered_indices.is_empty() {
-            self.panes[self.active_pane].scroll = self.panes[self.active_pane].scroll.min(self.panes[self.active_pane].filtered_indices.len() - 1);
+            self.panes[self.active_pane].scroll = self.panes[self.active_pane]
+                .scroll
+                .min(self.panes[self.active_pane].filtered_indices.len() - 1);
         } else {
             self.panes[self.active_pane].scroll = 0;
         }
@@ -1351,21 +1404,27 @@ impl<'a> AppState<'a> {
 
     /// Scroll down by one line
     pub fn scroll_down(&mut self) {
-        if !self.panes[self.active_pane].filtered_indices.is_empty() && self.panes[self.active_pane].scroll < self.panes[self.active_pane].filtered_indices.len() - 1 {
+        if !self.panes[self.active_pane].filtered_indices.is_empty()
+            && self.panes[self.active_pane].scroll
+                < self.panes[self.active_pane].filtered_indices.len() - 1
+        {
             self.panes[self.active_pane].scroll += 1;
         }
     }
 
     /// Scroll up by a page
     pub fn scroll_page_up(&mut self, page_size: usize) {
-        self.panes[self.active_pane].scroll = self.panes[self.active_pane].scroll.saturating_sub(page_size);
+        self.panes[self.active_pane].scroll = self.panes[self.active_pane]
+            .scroll
+            .saturating_sub(page_size);
         self.panes[self.active_pane].stick_to_bottom = false;
     }
 
     /// Scroll down by a page
     pub fn scroll_page_down(&mut self, page_size: usize) {
         if !self.panes[self.active_pane].filtered_indices.is_empty() {
-            self.panes[self.active_pane].scroll = (self.panes[self.active_pane].scroll + page_size).min(self.panes[self.active_pane].filtered_indices.len() - 1);
+            self.panes[self.active_pane].scroll = (self.panes[self.active_pane].scroll + page_size)
+                .min(self.panes[self.active_pane].filtered_indices.len() - 1);
         }
     }
 
@@ -1378,7 +1437,8 @@ impl<'a> AppState<'a> {
     /// Go to the bottom of the log and enable stick_to_bottom
     pub fn go_to_bottom(&mut self) {
         if !self.panes[self.active_pane].filtered_indices.is_empty() {
-            self.panes[self.active_pane].scroll = self.panes[self.active_pane].filtered_indices.len() - 1;
+            self.panes[self.active_pane].scroll =
+                self.panes[self.active_pane].filtered_indices.len() - 1;
         }
         self.panes[self.active_pane].stick_to_bottom = true;
     }
@@ -1388,7 +1448,9 @@ impl<'a> AppState<'a> {
         if self.panes[self.active_pane].filtered_indices.is_empty() {
             return;
         }
-        if self.panes[self.active_pane].scroll < self.panes[self.active_pane].filtered_indices.len() - 1 {
+        if self.panes[self.active_pane].scroll
+            < self.panes[self.active_pane].filtered_indices.len() - 1
+        {
             self.panes[self.active_pane].scroll += 1;
             self.panes[self.active_pane].stick_to_bottom = false;
             self.status_message = Some(format!(
@@ -1423,7 +1485,8 @@ impl<'a> AppState<'a> {
             ));
         } else {
             // Wrap to end
-            self.panes[self.active_pane].scroll = self.panes[self.active_pane].filtered_indices.len() - 1;
+            self.panes[self.active_pane].scroll =
+                self.panes[self.active_pane].filtered_indices.len() - 1;
             self.panes[self.active_pane].stick_to_bottom = false;
             self.status_message = Some(format!(
                 "Match {}/{} (wrapped)",
@@ -1444,7 +1507,10 @@ impl<'a> AppState<'a> {
 
     /// Get the current filter input text
     pub fn filter_input(&self) -> String {
-        self.panes[self.active_pane].filter_textarea.lines().join("\n")
+        self.panes[self.active_pane]
+            .filter_textarea
+            .lines()
+            .join("\n")
     }
 
     /// Apply the current filter input as the active filter
@@ -1455,7 +1521,10 @@ impl<'a> AppState<'a> {
         } else {
             // Add to history before applying
             self.add_to_filter_history(input.clone());
-            self.panes[self.active_pane].active_filter = Some(ActiveFilter::new(input, self.panes[self.active_pane].filter_is_regex));
+            self.panes[self.active_pane].active_filter = Some(ActiveFilter::new(
+                input,
+                self.panes[self.active_pane].filter_is_regex,
+            ));
         }
         self.recompute_filter();
         self.mode = InputMode::Normal;
@@ -1473,7 +1542,9 @@ impl<'a> AppState<'a> {
             .map(|f| f.pattern.clone())
             .unwrap_or_default();
         self.panes[self.active_pane].filter_textarea = TextArea::new(vec![prev]);
-        self.panes[self.active_pane].filter_textarea.set_cursor_line_style(Style::default());
+        self.panes[self.active_pane]
+            .filter_textarea
+            .set_cursor_line_style(Style::default());
         self.mode = InputMode::Normal;
         self.panes[self.active_pane].filter_last_change = None;
         self.panes[self.active_pane].filter_needs_recompute = false;
@@ -1497,7 +1568,10 @@ impl<'a> AppState<'a> {
                 if input.is_empty() {
                     self.panes[self.active_pane].active_filter = None;
                 } else {
-                    self.panes[self.active_pane].active_filter = Some(ActiveFilter::new(input, self.panes[self.active_pane].filter_is_regex));
+                    self.panes[self.active_pane].active_filter = Some(ActiveFilter::new(
+                        input,
+                        self.panes[self.active_pane].filter_is_regex,
+                    ));
                 }
                 self.recompute_filter();
                 self.panes[self.active_pane].filter_needs_recompute = false;
@@ -1507,11 +1581,15 @@ impl<'a> AppState<'a> {
 
     /// Toggle regex mode for filtering
     pub fn toggle_regex_mode(&mut self) {
-        self.panes[self.active_pane].filter_is_regex = !self.panes[self.active_pane].filter_is_regex;
+        self.panes[self.active_pane].filter_is_regex =
+            !self.panes[self.active_pane].filter_is_regex;
         if self.panes[self.active_pane].active_filter.is_some() {
             // Reapply filter with new mode
             let input = self.filter_input();
-            self.panes[self.active_pane].active_filter = Some(ActiveFilter::new(input, self.panes[self.active_pane].filter_is_regex));
+            self.panes[self.active_pane].active_filter = Some(ActiveFilter::new(
+                input,
+                self.panes[self.active_pane].filter_is_regex,
+            ));
             self.recompute_filter();
         }
         self.status_message = Some(format!(
@@ -1526,11 +1604,18 @@ impl<'a> AppState<'a> {
 
     /// Get total and visible line counts
     pub fn line_counts(&self) -> (usize, usize) {
-        (self.lines.len(), self.panes[self.active_pane].filtered_indices.len())
+        (
+            self.lines.len(),
+            self.panes[self.active_pane].filtered_indices.len(),
+        )
     }
 
     /// Get visible lines for a specific pane
-    pub fn visible_lines_for_pane(&mut self, pane_idx: usize, height: usize) -> Vec<(usize, &LogLine)> {
+    pub fn visible_lines_for_pane(
+        &mut self,
+        pane_idx: usize,
+        height: usize,
+    ) -> Vec<(usize, &LogLine)> {
         if pane_idx >= self.panes.len() {
             return Vec::new();
         }
@@ -1555,9 +1640,7 @@ impl<'a> AppState<'a> {
         self.panes[pane_idx].filtered_indices[start..end]
             .iter()
             .enumerate()
-            .filter_map(|(i, &line_idx)| {
-                self.lines.get(line_idx).map(|line| (start + i, line))
-            })
+            .filter_map(|(i, &line_idx)| self.lines.get(line_idx).map(|line| (start + i, line)))
             .collect()
     }
 
@@ -1566,7 +1649,10 @@ impl<'a> AppState<'a> {
         if pane_idx >= self.panes.len() {
             return (self.lines.len(), 0);
         }
-        (self.lines.len(), self.panes[pane_idx].filtered_indices.len())
+        (
+            self.lines.len(),
+            self.panes[pane_idx].filtered_indices.len(),
+        )
     }
 }
 

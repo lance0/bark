@@ -181,7 +181,11 @@ fn handle_normal_mode(state: &mut AppState, key: KeyEvent, page_size: usize) {
                 if let Some(visible) = state.panes[state.active_pane].visible_sources.get_mut(idx) {
                     *visible = !*visible;
                 }
-                let is_visible = state.panes[state.active_pane].visible_sources.get(idx).copied().unwrap_or(true);
+                let is_visible = state.panes[state.active_pane]
+                    .visible_sources
+                    .get(idx)
+                    .copied()
+                    .unwrap_or(true);
                 state.recompute_filter();
                 let source_name = state.sources[idx].name();
                 state.status_message = Some(format!(
@@ -195,12 +199,13 @@ fn handle_normal_mode(state: &mut AppState, key: KeyEvent, page_size: usize) {
         // 'v' - solo view (show only selected source) or toggle back to all
         KeyCode::Char('v') => {
             if state.focused_panel == FocusedPanel::Sources {
-                state.panes[state.active_pane].view_mode = match state.panes[state.active_pane].view_mode {
-                    SourceViewMode::SingleSource(id) if id == state.current_source_idx => {
-                        SourceViewMode::AllMerged
-                    }
-                    _ => SourceViewMode::SingleSource(state.current_source_idx),
-                };
+                state.panes[state.active_pane].view_mode =
+                    match state.panes[state.active_pane].view_mode {
+                        SourceViewMode::SingleSource(id) if id == state.current_source_idx => {
+                            SourceViewMode::AllMerged
+                        }
+                        _ => SourceViewMode::SingleSource(state.current_source_idx),
+                    };
                 state.recompute_filter();
                 state.status_message = Some(match state.panes[state.active_pane].view_mode {
                     SourceViewMode::AllMerged => "Showing all sources".to_string(),
@@ -305,7 +310,8 @@ fn handle_normal_mode(state: &mut AppState, key: KeyEvent, page_size: usize) {
 
         // Toggle pause (stop following new logs)
         KeyCode::Char('p') => {
-            state.panes[state.active_pane].stick_to_bottom = !state.panes[state.active_pane].stick_to_bottom;
+            state.panes[state.active_pane].stick_to_bottom =
+                !state.panes[state.active_pane].stick_to_bottom;
             state.status_message = Some(if state.panes[state.active_pane].stick_to_bottom {
                 "Following logs (auto-scroll ON)".to_string()
             } else {
@@ -517,7 +523,8 @@ fn handle_split_command(state: &mut AppState, key: KeyEvent) {
         // Escape cancels split command
         KeyCode::Esc => {}
         _ => {
-            state.status_message = Some("Split: v=vertical s=horizontal q=close w=cycle".to_string());
+            state.status_message =
+                Some("Split: v=vertical s=horizontal q=close w=cycle".to_string());
         }
     }
 }
@@ -607,7 +614,12 @@ pub fn handle_picker_input(state: &mut AppState, key: KeyEvent) -> PickerAction 
                 .filter(|(i, _)| {
                     // Currently checked but wasn't initially checked
                     state.picker.checked.get(*i).copied().unwrap_or(false)
-                        && !state.picker.initial_checked.get(*i).copied().unwrap_or(false)
+                        && !state
+                            .picker
+                            .initial_checked
+                            .get(*i)
+                            .copied()
+                            .unwrap_or(false)
                 })
                 .map(|(_, s)| SelectedSource {
                     name: s.name.clone(),

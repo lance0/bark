@@ -95,7 +95,13 @@ async fn main() -> Result<()> {
     }));
 
     // Main event loop
-    let result = run_event_loop(&mut terminal, &mut state, &mut event_rx, &mut source_manager).await;
+    let result = run_event_loop(
+        &mut terminal,
+        &mut state,
+        &mut event_rx,
+        &mut source_manager,
+    )
+    .await;
 
     // Clean up source manager
     drop(source_manager);
@@ -113,7 +119,10 @@ async fn main() -> Result<()> {
 
 /// Parse command line arguments into sources
 /// Returns (sources, optional picker mode to open on startup)
-fn parse_sources(args: &[String], config: &Config) -> Result<(Vec<ParsedSource>, Option<PickerMode>)> {
+fn parse_sources(
+    args: &[String],
+    config: &Config,
+) -> Result<(Vec<ParsedSource>, Option<PickerMode>)> {
     let mut sources: Vec<ParsedSource> = Vec::new();
     let mut i = 1;
 
@@ -237,7 +246,10 @@ fn parse_sources(args: &[String], config: &Config) -> Result<(Vec<ParsedSource>,
                     i += 1;
 
                     // Check for -n flag
-                    if i < args.len() && (args[i] == "-n" || args[i] == "--namespace") && i + 1 < args.len() {
+                    if i < args.len()
+                        && (args[i] == "-n" || args[i] == "--namespace")
+                        && i + 1 < args.len()
+                    {
                         namespace = Some(args[i + 1].clone());
                         i += 2;
                     }

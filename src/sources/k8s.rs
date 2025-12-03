@@ -160,11 +160,7 @@ mod tests {
         let source = K8sSource::new("my-pod".to_string(), None, None);
         assert_eq!(source.name(), "k8s:my-pod");
 
-        let source = K8sSource::new(
-            "my-pod".to_string(),
-            Some("production".to_string()),
-            None,
-        );
+        let source = K8sSource::new("my-pod".to_string(), Some("production".to_string()), None);
         assert_eq!(source.name(), "k8s:production/my-pod");
 
         let source = K8sSource::new(
