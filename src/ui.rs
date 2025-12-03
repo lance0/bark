@@ -345,7 +345,10 @@ fn draw_filters_panel(frame: &mut Frame, state: &AppState, area: Rect) {
 
 /// Draw the header showing the current source
 fn draw_header(frame: &mut Frame, state: &AppState, area: Rect) {
-    let source_name = state.current_source().name();
+    let source_name = state
+        .current_source()
+        .map(|s| s.name())
+        .unwrap_or_else(|| "No sources".to_string());
     let header = Paragraph::new(Line::from(vec![
         Span::styled(
             " bark ",
@@ -392,6 +395,11 @@ fn draw_pane(frame: &mut Frame, state: &mut AppState, pane_idx: usize, area: Rec
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
+
+    // Store the inner area for mouse click handling
+    if pane_idx < state.log_view_areas.len() {
+        state.log_view_areas[pane_idx] = inner;
+    }
 
     let height = inner.height as usize;
     if height == 0 {
@@ -478,9 +486,14 @@ fn draw_pane(frame: &mut Frame, state: &mut AppState, pane_idx: usize, area: Rec
         state.panes[pane_idx].horizontal_scroll
     };
 
+    // Get selected line for highlighting
+    let selected_line = state.panes[pane_idx].selected_line;
+
     for (idx, (raw, has_ansi, level_color, relative_time, _is_json, is_bookmarked, source_id, line_number)) in
         line_data.iter().enumerate()
     {
+        // Check if this line is selected
+        let is_selected = selected_line.map(|sel| sel == scroll_pos + idx).unwrap_or(false);
         // Check if we have pretty JSON for this line
         let display_text = json_cache
             .get(idx)
@@ -534,6 +547,18 @@ fn draw_pane(frame: &mut Frame, state: &mut AppState, pane_idx: usize, area: Rec
             None
         };
 
+        // Build selection indicator if selected
+        let selection_prefix: Option<Span> = if is_selected {
+            Some(Span::styled(
+                "▶ ",
+                Style::default()
+                    .fg(theme.border_focused)
+                    .add_modifier(Modifier::BOLD),
+            ))
+        } else {
+            None
+        };
+
         // Build relative time prefix if enabled
         let time_prefix: Option<Vec<Span>> = relative_time.as_ref().map(|rt| {
             vec![Span::styled(
@@ -580,6 +605,9 @@ fn draw_pane(frame: &mut Frame, state: &mut AppState, pane_idx: usize, area: Rec
                             if let Some(ref bm) = bookmark_prefix {
                                 prefix_spans.push(bm.clone());
                             }
+                            if let Some(ref sel) = selection_prefix {
+                                prefix_spans.push(sel.clone());
+                            }
                             if let Some(ref tp) = time_prefix {
                                 prefix_spans.extend(tp.clone());
                             }
@@ -607,6 +635,9 @@ fn draw_pane(frame: &mut Frame, state: &mut AppState, pane_idx: usize, area: Rec
                         }
                         if let Some(ref bm) = bookmark_prefix {
                             prefix_spans.push(bm.clone());
+                        }
+                        if let Some(ref sel) = selection_prefix {
+                            prefix_spans.push(sel.clone());
                         }
                         if let Some(ref tp) = time_prefix {
                             prefix_spans.extend(tp.clone());
@@ -663,7 +694,7 @@ fn draw_pane(frame: &mut Frame, state: &mut AppState, pane_idx: usize, area: Rec
                 let mut highlighted_line =
                     highlight_matches(&scrolled, &matches, base_style, &theme);
 
-                // Add prefixes (line number, source, bookmark, time) - only on first line
+                // Add prefixes (line number, source, bookmark, selection, time) - only on first line
                 if show_prefix {
                     let mut prefix_spans = Vec::new();
                     if let Some(ref ln) = line_num_prefix {
@@ -674,6 +705,9 @@ fn draw_pane(frame: &mut Frame, state: &mut AppState, pane_idx: usize, area: Rec
                     }
                     if let Some(ref bm) = bookmark_prefix {
                         prefix_spans.push(bm.clone());
+                    }
+                    if let Some(ref sel) = selection_prefix {
+                        prefix_spans.push(sel.clone());
                     }
                     if let Some(ref tp) = time_prefix {
                         prefix_spans.extend(tp.clone());
@@ -868,7 +902,7 @@ fn draw_help_overlay(frame: &mut Frame, theme: &Theme) {
 
     // Center the help box
     let width = 50.min(area.width.saturating_sub(4));
-    let height = 46.min(area.height.saturating_sub(4));
+    let height = 52.min(area.height.saturating_sub(4));
     let x = (area.width - width) / 2;
     let y = (area.height - height) / 2;
     let help_area = Rect::new(x, y, width, height);
@@ -923,6 +957,12 @@ fn draw_help_overlay(frame: &mut Frame, theme: &Theme) {
         Line::from("Sources:"),
         Line::from("  D            Docker container picker"),
         Line::from("  K            Kubernetes pod picker"),
+        Line::from("  Space        Toggle source visibility"),
+        Line::from("  v            Solo view (selected only)"),
+        Line::from("  a            Show all sources"),
+        Line::from(""),
+        Line::from("Saved Filters:"),
+        Line::from("  x/Delete     Remove saved filter"),
         Line::from(""),
         Line::from("Other:"),
         Line::from("  S            Open settings"),

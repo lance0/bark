@@ -29,6 +29,33 @@ pub fn handle_mouse(state: &mut AppState, mouse: MouseEvent, _page_size: usize) 
                 state.scroll_down();
             }
         }
+        MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+            // Check if click is in any log view pane
+            let col = mouse.column;
+            let row = mouse.row;
+
+            for (pane_idx, area) in state.log_view_areas.iter().enumerate() {
+                if col >= area.x
+                    && col < area.x + area.width
+                    && row >= area.y
+                    && row < area.y + area.height
+                {
+                    // Click is in this pane
+                    // Switch to this pane if in split mode
+                    if state.is_split() && pane_idx != state.active_pane {
+                        state.active_pane = pane_idx;
+                    }
+
+                    // Calculate which line was clicked (relative to pane top)
+                    let line_row = (row - area.y) as usize;
+                    state.select_line_at_row(line_row);
+                    return;
+                }
+            }
+
+            // Click outside log view - clear selection
+            state.clear_selection();
+        }
         _ => {}
     }
 }
@@ -328,9 +355,13 @@ fn handle_normal_mode(state: &mut AppState, key: KeyEvent, page_size: usize) {
             }
         }
 
-        // Clear filter
+        // Clear selection or filter
         KeyCode::Esc => {
-            if state.panes[state.active_pane].active_filter.is_some() {
+            // First clear selection if present
+            if state.panes[state.active_pane].selected_line.is_some() {
+                state.clear_selection();
+            } else if state.panes[state.active_pane].active_filter.is_some() {
+                // Then clear filter if no selection
                 state.panes[state.active_pane].active_filter = None;
                 state.panes[state.active_pane].filter_textarea.select_all();
                 state.panes[state.active_pane].filter_textarea.cut();
@@ -364,16 +395,17 @@ fn handle_normal_mode(state: &mut AppState, key: KeyEvent, page_size: usize) {
             state.mode = InputMode::SplitCommand;
         }
 
-        // Yank (copy) current line to clipboard
+        // Yank (copy) current/selected line to clipboard
         KeyCode::Char('y') => {
             if let Some(line) = state.get_current_line_text() {
-                match arboard::Clipboard::new() {
-                    Ok(mut clipboard) => {
+                match state.clipboard() {
+                    Ok(clipboard) => {
                         // Strip ANSI codes for clipboard
                         let clean_line = strip_ansi_codes(&line);
                         match clipboard.set_text(clean_line) {
                             Ok(()) => {
                                 state.status_message = Some("Yanked line to clipboard".to_string());
+                                state.clear_selection(); // Clear selection after yank
                             }
                             Err(e) => {
                                 state.status_message = Some(format!("Clipboard error: {}", e));
@@ -530,8 +562,12 @@ pub enum PickerAction {
     None,
     /// Close the picker
     Close,
-    /// Add selected sources - returns list of sources with namespace info and mode
-    AddSources(Vec<SelectedSource>, PickerMode),
+    /// Modify sources - returns (sources to add, sources to remove, mode)
+    ModifySources {
+        add: Vec<SelectedSource>,
+        remove: Vec<SelectedSource>,
+        mode: PickerMode,
+    },
 }
 
 /// Handle picker mode input - returns action for main loop
@@ -553,7 +589,7 @@ pub fn handle_picker_input(state: &mut AppState, key: KeyEvent) -> PickerAction 
             PickerAction::None
         }
 
-        // Confirm selection - add sources
+        // Confirm selection - add/remove sources
         KeyCode::Enter => {
             if state.picker.sources.is_empty() {
                 state.picker.close();
@@ -562,36 +598,62 @@ pub fn handle_picker_input(state: &mut AppState, key: KeyEvent) -> PickerAction 
 
             let mode = state.picker.mode;
 
-            // Get selected sources with namespace info
-            let sources: Vec<SelectedSource> = if state.picker.has_selection() {
-                state
-                    .picker
-                    .get_checked_sources()
-                    .iter()
-                    .map(|s| SelectedSource {
-                        name: s.name.clone(),
-                        namespace: s.namespace.clone(),
-                    })
-                    .collect()
-            } else {
-                // No checkboxes - just add the currently highlighted one
-                state
-                    .picker
-                    .get_selected_source()
-                    .map(|s| vec![SelectedSource {
-                        name: s.name.clone(),
-                        namespace: s.namespace.clone(),
-                    }])
-                    .unwrap_or_default()
-            };
+            // Get sources to add (newly checked, not initially checked)
+            let add: Vec<SelectedSource> = state
+                .picker
+                .sources
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| {
+                    // Currently checked but wasn't initially checked
+                    state.picker.checked.get(*i).copied().unwrap_or(false)
+                        && !state.picker.initial_checked.get(*i).copied().unwrap_or(false)
+                })
+                .map(|(_, s)| SelectedSource {
+                    name: s.name.clone(),
+                    namespace: s.namespace.clone(),
+                })
+                .collect();
 
-            if sources.is_empty() {
-                state.picker.close();
+            // Get sources to remove (initially checked but now unchecked)
+            let remove: Vec<SelectedSource> = state
+                .picker
+                .get_unchecked_sources()
+                .iter()
+                .map(|s| SelectedSource {
+                    name: s.name.clone(),
+                    namespace: s.namespace.clone(),
+                })
+                .collect();
+
+            state.picker.close();
+
+            // Fallback: if no explicit changes, add the highlighted item (if not already added)
+            if add.is_empty() && remove.is_empty() {
+                let selected = state.picker.selected;
+                if let Some(source) = state.picker.sources.get(selected) {
+                    // Only add if it wasn't initially checked (not already a source)
+                    let was_initial = state
+                        .picker
+                        .initial_checked
+                        .get(selected)
+                        .copied()
+                        .unwrap_or(false);
+                    if !was_initial {
+                        return PickerAction::ModifySources {
+                            add: vec![SelectedSource {
+                                name: source.name.clone(),
+                                namespace: source.namespace.clone(),
+                            }],
+                            remove: vec![],
+                            mode,
+                        };
+                    }
+                }
                 return PickerAction::Close;
             }
 
-            state.picker.close();
-            PickerAction::AddSources(sources, mode)
+            PickerAction::ModifySources { add, remove, mode }
         }
 
         // Cancel

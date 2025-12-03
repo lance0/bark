@@ -2,9 +2,23 @@
 
 All notable changes to Bark will be documented in this file.
 
-## [Unreleased]
+## [1.1.0] - 2025-12-03
 
 ### Added
+- **Auto-discovery mode** - Start bark without arguments to open source picker immediately
+  - `bark` - Opens Docker picker to discover running containers
+  - `bark --docker` - Discovers all Docker containers (no name required)
+  - `bark --k8s` - Discovers all Kubernetes pods (no pod name required)
+  - `bark --all` - Discovers all Docker containers and K8s pods
+- **Click-to-select lines** - Click on any log line to select it for yanking
+  - Selected line shows `▶` indicator
+  - `y` yanks the selected line (or top visible line if none selected)
+  - `Esc` clears selection (then clears filter on second press)
+  - Clicking in split view also switches focus to that pane
+- **Improved source picker** - Shows existing sources as checked, allows deselecting
+  - Already-added sources appear pre-checked in picker
+  - Uncheck and press Enter to hide sources from view
+  - Press Enter without toggling to add highlighted item
 - **Multi-source support** - View logs from multiple containers/pods simultaneously
   - CLI: `bark --docker nginx --docker redis` or `bark --k8s frontend --k8s backend`
   - Mixed sources: `bark /var/log/app.log --docker nginx`
@@ -51,8 +65,9 @@ All notable changes to Bark will be documented in this file.
 - AppState now accepts multiple sources at initialization
 - Event loop handles multiplexed SourcedLogEvent from all sources
 - Sources panel shows `[x]/[ ]` visibility toggles
-- CLI help updated with multi-source examples
+- CLI help updated with multi-source examples and auto-discovery options
 - Non-blocking container/pod discovery (UI stays responsive)
+- Tab key now cycles through split panes before moving to sidebar
 
 ### Security
 - **Input validation** - Reject hostnames/container names starting with `-` to prevent option injection

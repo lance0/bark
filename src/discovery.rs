@@ -8,6 +8,7 @@ pub struct DiscoveredSource {
     /// Name of the container/pod
     pub name: String,
     /// Type of source (for display)
+    #[allow(dead_code)]
     pub source_type: SourceType,
     /// Current status (running, stopped, etc.)
     pub status: String,

@@ -53,28 +53,11 @@ async fn main() -> Result<()> {
         }
     }
 
-    if args.len() < 2 {
-        eprintln!("Usage: bark <file_path> [additional sources...]");
-        eprintln!("       bark --docker <container> [--docker <container2> ...]");
-        eprintln!("       bark --k8s <pod> [-n namespace] [-c container] [--k8s <pod2> ...]");
-        eprintln!("       bark --ssh <host> <remote_path>");
-        eprintln!("\nMultiple sources can be combined:");
-        eprintln!("       bark --docker nginx --docker redis");
-        eprintln!("       bark /var/log/app.log --docker nginx");
-        eprintln!("\nRun 'bark --help' for more information.");
-        std::process::exit(1);
-    }
-
     // Load config first (needed for SSH settings)
     let config = Config::from_env();
 
-    // Parse all sources from command line
-    let parsed_sources = parse_sources(&args, &config)?;
-
-    if parsed_sources.is_empty() {
-        eprintln!("No valid sources specified. Run 'bark --help' for usage.");
-        std::process::exit(1);
-    }
+    // Parse all sources from command line (or empty if none specified)
+    let (parsed_sources, open_picker_mode) = parse_sources(&args, &config)?;
 
     // Extract source types for AppState
     let source_types: Vec<LogSourceType> = parsed_sources
@@ -84,6 +67,11 @@ async fn main() -> Result<()> {
 
     // Initialize state
     let mut state = AppState::new(&config, source_types);
+
+    // Open picker on startup if requested
+    if let Some(mode) = open_picker_mode {
+        state.picker.open(mode);
+    }
 
     // Create source manager and add all sources
     let (mut source_manager, mut event_rx) = SourceManager::new(1000);
@@ -124,69 +112,154 @@ async fn main() -> Result<()> {
 }
 
 /// Parse command line arguments into sources
-fn parse_sources(args: &[String], config: &Config) -> Result<Vec<ParsedSource>> {
+/// Returns (sources, optional picker mode to open on startup)
+fn parse_sources(args: &[String], config: &Config) -> Result<(Vec<ParsedSource>, Option<PickerMode>)> {
     let mut sources: Vec<ParsedSource> = Vec::new();
     let mut i = 1;
 
+    // No args - open picker
+    if args.len() < 2 {
+        return Ok((sources, Some(PickerMode::Docker)));
+    }
+
     while i < args.len() {
         match args[i].as_str() {
-            "--docker" => {
-                if i + 1 >= args.len() {
-                    anyhow::bail!("--docker requires a container name");
-                }
-                let container = args[i + 1].clone();
-
-                // Validate container name to prevent option injection
-                if let Err(e) = sources::docker::validate_container_name(&container) {
-                    anyhow::bail!("{}", e);
-                }
-
-                sources.push(ParsedSource {
-                    source_type: LogSourceType::Docker {
-                        container: container.clone(),
-                    },
-                    source: Box::new(sources::docker::DockerSource::new(container)),
-                });
-                i += 2;
-            }
-            "--k8s" => {
-                if i + 1 >= args.len() {
-                    anyhow::bail!("--k8s requires a pod name");
-                }
-                let pod = args[i + 1].clone();
-
-                // Validate pod name to prevent option injection
-                if let Err(e) = sources::k8s::validate_pod_name(&pod) {
-                    anyhow::bail!("{}", e);
-                }
-                let mut namespace: Option<String> = None;
-                let mut container: Option<String> = None;
-                i += 2;
-
-                // Parse optional -n and -c following this --k8s
-                while i < args.len() {
-                    match args[i].as_str() {
-                        "-n" | "--namespace" if i + 1 < args.len() => {
-                            namespace = Some(args[i + 1].clone());
-                            i += 2;
-                        }
-                        "-c" | "--container" if i + 1 < args.len() => {
-                            container = Some(args[i + 1].clone());
-                            i += 2;
-                        }
-                        // Stop at next source or unknown arg
-                        _ => break,
+            "--all" => {
+                // Discover all Docker containers
+                if let Ok(docker_sources) = discover_docker_containers() {
+                    for ds in docker_sources {
+                        sources.push(ParsedSource {
+                            source_type: LogSourceType::Docker {
+                                container: ds.name.clone(),
+                            },
+                            source: Box::new(sources::docker::DockerSource::new(ds.name)),
+                        });
                     }
                 }
+                // Discover all K8s pods
+                if let Ok(k8s_sources) = discover_k8s_pods(None) {
+                    for ds in k8s_sources {
+                        sources.push(ParsedSource {
+                            source_type: LogSourceType::K8s {
+                                pod: ds.name.clone(),
+                                namespace: ds.namespace.clone(),
+                                container: None,
+                            },
+                            source: Box::new(sources::k8s::K8sSource::new(
+                                ds.name,
+                                ds.namespace,
+                                None,
+                            )),
+                        });
+                    }
+                }
+                i += 1;
+            }
+            "--docker" => {
+                // Check if next arg is a container name or another flag
+                let has_container_name = i + 1 < args.len() && !args[i + 1].starts_with('-');
 
-                sources.push(ParsedSource {
-                    source_type: LogSourceType::K8s {
-                        pod: pod.clone(),
-                        namespace: namespace.clone(),
-                        container: container.clone(),
-                    },
-                    source: Box::new(sources::k8s::K8sSource::new(pod, namespace, container)),
-                });
+                if has_container_name {
+                    let container = args[i + 1].clone();
+
+                    // Validate container name to prevent option injection
+                    if let Err(e) = sources::docker::validate_container_name(&container) {
+                        anyhow::bail!("{}", e);
+                    }
+
+                    sources.push(ParsedSource {
+                        source_type: LogSourceType::Docker {
+                            container: container.clone(),
+                        },
+                        source: Box::new(sources::docker::DockerSource::new(container)),
+                    });
+                    i += 2;
+                } else {
+                    // --docker without name: discover all Docker containers
+                    if let Ok(docker_sources) = discover_docker_containers() {
+                        for ds in docker_sources {
+                            sources.push(ParsedSource {
+                                source_type: LogSourceType::Docker {
+                                    container: ds.name.clone(),
+                                },
+                                source: Box::new(sources::docker::DockerSource::new(ds.name)),
+                            });
+                        }
+                    }
+                    i += 1;
+                }
+            }
+            "--k8s" => {
+                // Check if next arg is a pod name or another flag/namespace option
+                let has_pod_name = i + 1 < args.len()
+                    && !args[i + 1].starts_with('-')
+                    && args[i + 1] != "-n"
+                    && args[i + 1] != "-c";
+
+                if has_pod_name {
+                    let pod = args[i + 1].clone();
+
+                    // Validate pod name to prevent option injection
+                    if let Err(e) = sources::k8s::validate_pod_name(&pod) {
+                        anyhow::bail!("{}", e);
+                    }
+                    let mut namespace: Option<String> = None;
+                    let mut container: Option<String> = None;
+                    i += 2;
+
+                    // Parse optional -n and -c following this --k8s
+                    while i < args.len() {
+                        match args[i].as_str() {
+                            "-n" | "--namespace" if i + 1 < args.len() => {
+                                namespace = Some(args[i + 1].clone());
+                                i += 2;
+                            }
+                            "-c" | "--container" if i + 1 < args.len() => {
+                                container = Some(args[i + 1].clone());
+                                i += 2;
+                            }
+                            // Stop at next source or unknown arg
+                            _ => break,
+                        }
+                    }
+
+                    sources.push(ParsedSource {
+                        source_type: LogSourceType::K8s {
+                            pod: pod.clone(),
+                            namespace: namespace.clone(),
+                            container: container.clone(),
+                        },
+                        source: Box::new(sources::k8s::K8sSource::new(pod, namespace, container)),
+                    });
+                } else {
+                    // --k8s without pod name: parse optional namespace, then discover all
+                    let mut namespace: Option<String> = None;
+                    i += 1;
+
+                    // Check for -n flag
+                    if i < args.len() && (args[i] == "-n" || args[i] == "--namespace") && i + 1 < args.len() {
+                        namespace = Some(args[i + 1].clone());
+                        i += 2;
+                    }
+
+                    // Discover all K8s pods in namespace
+                    if let Ok(k8s_sources) = discover_k8s_pods(namespace.as_deref()) {
+                        for ds in k8s_sources {
+                            sources.push(ParsedSource {
+                                source_type: LogSourceType::K8s {
+                                    pod: ds.name.clone(),
+                                    namespace: ds.namespace.clone(),
+                                    container: None,
+                                },
+                                source: Box::new(sources::k8s::K8sSource::new(
+                                    ds.name,
+                                    ds.namespace,
+                                    None,
+                                )),
+                            });
+                        }
+                    }
+                }
             }
             "--ssh" => {
                 if i + 2 >= args.len() {
@@ -232,7 +305,7 @@ fn parse_sources(args: &[String], config: &Config) -> Result<Vec<ParsedSource>> 
         }
     }
 
-    Ok(sources)
+    Ok((sources, None))
 }
 
 fn print_help() {
@@ -242,29 +315,36 @@ fn print_help() {
     );
     println!();
     println!("USAGE:");
-    println!("    bark <file_path> [additional sources...]");
-    println!("    bark --docker <container> [--docker <container2> ...]");
-    println!("    bark --k8s <pod> [-n namespace] [-c container] [--k8s <pod2> ...]");
-    println!("    bark --ssh <host> <remote_path>");
+    println!("    bark                                      # Open source picker");
+    println!("    bark --docker                             # All Docker containers");
+    println!("    bark --docker <container>                 # Specific container");
+    println!("    bark --k8s                                # All K8s pods");
+    println!("    bark --k8s <pod> [-n namespace]           # Specific pod");
+    println!("    bark --all                                # All Docker + K8s");
+    println!("    bark <file_path>                          # Tail a file");
+    println!("    bark --ssh <host> <remote_path>           # Remote file via SSH");
     println!();
     println!("OPTIONS:");
     println!("    -h, --help       Print help information");
     println!("    -V, --version    Print version information");
+    println!("    --all            Discover all Docker containers and K8s pods");
     println!();
     println!("SOURCES:");
     println!("    <file_path>      Tail a local log file");
-    println!("    --docker         Follow Docker container logs");
-    println!("    --k8s            Follow Kubernetes pod logs");
+    println!("    --docker         Follow Docker container logs (all if no name given)");
+    println!("    --k8s            Follow Kubernetes pod logs (all if no name given)");
     println!("    --ssh            Tail a remote file via SSH");
     println!();
     println!("EXAMPLES:");
-    println!("    bark /var/log/syslog");
-    println!("    bark --docker nginx");
-    println!("    bark --docker nginx --docker redis     # Multiple containers");
-    println!("    bark --k8s my-app -n production");
-    println!("    bark --k8s frontend --k8s backend      # Multiple pods");
-    println!("    bark /var/log/app.log --docker nginx   # Mixed sources");
-    println!("    bark --ssh user@server /var/log/app.log");
+    println!("    bark                                      # Interactive picker");
+    println!("    bark --docker                             # All running containers");
+    println!("    bark --docker nginx                       # Specific container");
+    println!("    bark --docker nginx --docker redis        # Multiple containers");
+    println!("    bark --k8s -n production                  # All pods in namespace");
+    println!("    bark --k8s my-app -n production           # Specific pod");
+    println!("    bark --all                                # Everything");
+    println!("    bark /var/log/app.log --docker nginx      # Mixed sources");
+    println!("    bark --ssh user@server /var/log/app.log   # Remote file");
     println!();
     println!("KEYBOARD SHORTCUTS:");
     println!("    j/k              Scroll down/up");
@@ -349,7 +429,7 @@ async fn run_event_loop<'a>(
             match rx.try_recv() {
                 Ok(result) => {
                     match result {
-                        Ok(sources) => state.picker.set_sources(sources),
+                        Ok(sources) => state.picker.set_sources(sources, &state.sources),
                         Err(e) => state.picker.set_error(e.to_string()),
                     }
                     discovery_rx = None;
@@ -390,10 +470,38 @@ async fn run_event_loop<'a>(
                                 // Handle picker mode separately
                                 if state.picker.visible {
                                     let action = handle_picker_input(state, key);
-                                    if let PickerAction::AddSources(selected_sources, mode) = action {
-                                        // Add the selected sources
-                                        let count = selected_sources.len();
-                                        for selected in selected_sources {
+                                    if let PickerAction::ModifySources { add, remove, mode } = action {
+                                        let mut added_count = 0;
+                                        let mut removed_count = 0;
+
+                                        // Hide sources that were deselected
+                                        for to_remove in &remove {
+                                            // Find and hide the source
+                                            for (idx, source) in state.sources.iter().enumerate() {
+                                                let matches = match (source, mode) {
+                                                    (LogSourceType::Docker { container }, PickerMode::Docker) => {
+                                                        container == &to_remove.name
+                                                    }
+                                                    (LogSourceType::K8s { pod, namespace, .. }, PickerMode::K8s) => {
+                                                        pod == &to_remove.name && *namespace == to_remove.namespace
+                                                    }
+                                                    _ => false,
+                                                };
+                                                if matches {
+                                                    // Hide in all panes
+                                                    for pane in &mut state.panes {
+                                                        if let Some(visible) = pane.visible_sources.get_mut(idx) {
+                                                            *visible = false;
+                                                        }
+                                                    }
+                                                    removed_count += 1;
+                                                    break;
+                                                }
+                                            }
+                                        }
+
+                                        // Add new sources
+                                        for selected in add {
                                             let source_id = state.sources.len();
                                             let (source_type, source): (LogSourceType, Box<dyn LogSource>) = match mode {
                                                 PickerMode::Docker => {
@@ -423,9 +531,17 @@ async fn run_event_loop<'a>(
 
                                             // Add to source manager
                                             source_manager.add_source(source_id, source).await;
+                                            added_count += 1;
                                         }
 
-                                        state.status_message = Some(format!("Added {} source(s)", count));
+                                        // Status message
+                                        let msg = match (added_count, removed_count) {
+                                            (0, 0) => "No changes".to_string(),
+                                            (a, 0) => format!("Added {} source(s)", a),
+                                            (0, r) => format!("Hidden {} source(s)", r),
+                                            (a, r) => format!("Added {}, hidden {} source(s)", a, r),
+                                        };
+                                        state.status_message = Some(msg);
                                     }
                                 } else {
                                     input::handle_key(state, key, page_size);

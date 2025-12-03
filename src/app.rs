@@ -6,12 +6,14 @@
 //! - Bookmarks and navigation state
 //! - UI mode and panel focus
 
+use arboard::{Clipboard, Error as ClipboardError};
 use crate::config::{Config, FILTER_DEBOUNCE_MS};
 use crate::discovery::DiscoveredSource;
 use crate::filter::{ActiveFilter, MatchRange, SavedFilter};
 use crate::sources::LogSourceType;
 use crate::theme::Theme;
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
+use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use std::collections::VecDeque;
 use std::fs::File;
@@ -236,6 +238,8 @@ pub struct PickerState {
     pub selected: usize,
     /// Which items are checked for multi-select
     pub checked: Vec<bool>,
+    /// Initial checked state (to detect removals)
+    pub initial_checked: Vec<bool>,
     /// Loading state
     pub loading: bool,
     /// Error message if discovery failed
@@ -250,6 +254,7 @@ impl Default for PickerState {
             sources: Vec::new(),
             selected: 0,
             checked: Vec::new(),
+            initial_checked: Vec::new(),
             loading: false,
             error: None,
         }
@@ -264,6 +269,7 @@ impl PickerState {
         self.sources.clear();
         self.selected = 0;
         self.checked.clear();
+        self.initial_checked.clear();
         self.loading = true;
         self.error = None;
     }
@@ -274,12 +280,42 @@ impl PickerState {
         self.loading = false;
     }
 
-    /// Set discovered sources
-    pub fn set_sources(&mut self, sources: Vec<DiscoveredSource>) {
-        self.checked = vec![false; sources.len()];
+    /// Set discovered sources, marking any that match existing sources as already checked
+    pub fn set_sources(&mut self, sources: Vec<DiscoveredSource>, existing_sources: &[LogSourceType]) {
+        self.checked = sources
+            .iter()
+            .map(|discovered| {
+                // Check if this discovered source already exists in the app
+                existing_sources.iter().any(|existing| match (existing, self.mode) {
+                    (LogSourceType::Docker { container }, PickerMode::Docker) => {
+                        container == &discovered.name
+                    }
+                    (LogSourceType::K8s { pod, namespace, .. }, PickerMode::K8s) => {
+                        pod == &discovered.name && *namespace == discovered.namespace
+                    }
+                    _ => false,
+                })
+            })
+            .collect();
+        // Save initial state to detect removals later
+        self.initial_checked = self.checked.clone();
         self.sources = sources;
         self.selected = 0;
         self.loading = false;
+    }
+
+    /// Get sources that were initially checked but are now unchecked (to be removed)
+    pub fn get_unchecked_sources(&self) -> Vec<&DiscoveredSource> {
+        self.sources
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| {
+                // Was initially checked but now unchecked
+                self.initial_checked.get(*i).copied().unwrap_or(false)
+                    && !self.checked.get(*i).copied().unwrap_or(false)
+            })
+            .map(|(_, s)| s)
+            .collect()
     }
 
     /// Set error state
@@ -306,31 +342,6 @@ impl PickerState {
     pub fn toggle_selected(&mut self) {
         if let Some(checked) = self.checked.get_mut(self.selected) {
             *checked = !*checked;
-        }
-    }
-
-    /// Get checked sources
-    pub fn get_checked_sources(&self) -> Vec<&DiscoveredSource> {
-        self.sources
-            .iter()
-            .zip(self.checked.iter())
-            .filter_map(|(source, &checked)| if checked { Some(source) } else { None })
-            .collect()
-    }
-
-    /// Check if any items are selected
-    pub fn has_selection(&self) -> bool {
-        self.checked.iter().any(|&c| c)
-    }
-
-    /// Get the single selected source (if none are checked, return current)
-    pub fn get_selected_source(&self) -> Option<&DiscoveredSource> {
-        // If items are checked, return the first checked one
-        if self.has_selection() {
-            self.get_checked_sources().first().copied()
-        } else {
-            // Otherwise return the currently highlighted one
-            self.sources.get(self.selected)
         }
     }
 
@@ -412,6 +423,10 @@ pub struct PaneState<'a> {
     // Bookmarks (per-pane)
     /// Bookmarked line indices (into the lines buffer)
     pub bookmarks: Vec<usize>,
+
+    // Line selection (for yank/click)
+    /// Currently selected line index (into filtered_indices), if any
+    pub selected_line: Option<usize>,
 }
 
 impl<'a> PaneState<'a> {
@@ -437,6 +452,7 @@ impl<'a> PaneState<'a> {
             visible_sources: vec![true; num_sources],
             view_mode: SourceViewMode::default(),
             bookmarks: Vec::new(),
+            selected_line: None,
         }
     }
 
@@ -467,20 +483,10 @@ impl<'a> PaneState<'a> {
             visible_sources: self.visible_sources.clone(),
             view_mode: self.view_mode,
             bookmarks: self.bookmarks.clone(),
+            selected_line: None, // Don't copy selection to new pane
         }
     }
 
-    /// Get the filter input text
-    pub fn filter_input(&self) -> String {
-        self.filter_textarea.lines().join("\n")
-    }
-
-    /// Set filter textarea text
-    pub fn set_filter_text(&mut self, text: &str) {
-        self.filter_textarea.select_all();
-        self.filter_textarea.cut();
-        self.filter_textarea.insert_str(text);
-    }
 }
 
 /// Main application state
@@ -524,6 +530,8 @@ pub struct AppState<'a> {
     pub picker: PickerState,
     /// Settings overlay state
     pub settings: SettingsState,
+    /// Shared clipboard handle (kept alive to avoid X11 drops)
+    pub clipboard: Option<Clipboard>,
 
     // === Display preferences (global) ===
     /// Whether to apply log level coloring (for lines without ANSI)
@@ -552,6 +560,10 @@ pub struct AppState<'a> {
     // === Filter history (shared across panes) ===
     /// Filter history (recent filters)
     pub filter_history: Vec<String>,
+
+    // === Layout tracking for mouse input ===
+    /// Log view area(s) for mouse click handling - one per pane
+    pub log_view_areas: Vec<Rect>,
 }
 
 impl<'a> AppState<'a> {
@@ -584,6 +596,7 @@ impl<'a> AppState<'a> {
             show_help: false,
             picker: PickerState::default(),
             settings: SettingsState::default(),
+            clipboard: None,
 
             // Display preferences
             level_colors_enabled: config.level_colors,
@@ -601,12 +614,23 @@ impl<'a> AppState<'a> {
 
             // Filter history
             filter_history: Vec::new(),
+
+            // Layout tracking
+            log_view_areas: vec![Rect::default()],
         }
     }
 
     /// Check if we're in split mode (have 2 panes)
     pub fn is_split(&self) -> bool {
         self.panes.len() > 1
+    }
+
+    /// Get or initialize a shared clipboard handle
+    pub fn clipboard(&mut self) -> Result<&mut Clipboard, ClipboardError> {
+        if self.clipboard.is_none() {
+            self.clipboard = Some(Clipboard::new()?);
+        }
+        Ok(self.clipboard.as_mut().unwrap())
     }
 
     /// Create a vertical split (side-by-side panes)
@@ -617,6 +641,7 @@ impl<'a> AppState<'a> {
         }
         let new_pane = self.panes[0].clone_for_split();
         self.panes.push(new_pane);
+        self.log_view_areas.push(Rect::default());
         self.split_direction = SplitDirection::Vertical;
         self.active_pane = 1; // Focus the new pane
         self.status_message = Some("Vertical split created".to_string());
@@ -630,6 +655,7 @@ impl<'a> AppState<'a> {
         }
         let new_pane = self.panes[0].clone_for_split();
         self.panes.push(new_pane);
+        self.log_view_areas.push(Rect::default());
         self.split_direction = SplitDirection::Horizontal;
         self.active_pane = 1; // Focus the new pane
         self.status_message = Some("Horizontal split created".to_string());
@@ -644,8 +670,10 @@ impl<'a> AppState<'a> {
         // Remove the non-active pane, or if active is 1, remove index 1
         if self.active_pane == 0 {
             self.panes.remove(1);
+            self.log_view_areas.truncate(1);
         } else {
             self.panes.remove(1);
+            self.log_view_areas.truncate(1);
             self.active_pane = 0;
         }
         self.split_direction = SplitDirection::None;
@@ -940,13 +968,31 @@ impl<'a> AppState<'a> {
         self.panes[self.active_pane].filter_textarea.insert_str(text);
     }
 
-    /// Get the raw text of the currently visible line at scroll position
+    /// Get the raw text of the selected line (if any) or the line at scroll position
     pub fn get_current_line_text(&self) -> Option<String> {
         if self.panes[self.active_pane].filtered_indices.is_empty() {
             return None;
         }
-        let line_idx = self.panes[self.active_pane].filtered_indices.get(self.panes[self.active_pane].scroll)?;
+        // Prefer selected line, otherwise use scroll position
+        let idx = self.panes[self.active_pane]
+            .selected_line
+            .unwrap_or(self.panes[self.active_pane].scroll);
+        let line_idx = self.panes[self.active_pane].filtered_indices.get(idx)?;
         self.lines.get(*line_idx).map(|l| l.raw.clone())
+    }
+
+    /// Select a line at the given viewport-relative row (0 = top of log view)
+    pub fn select_line_at_row(&mut self, row: usize) {
+        let pane = &mut self.panes[self.active_pane];
+        let target_idx = pane.scroll + row;
+        if target_idx < pane.filtered_indices.len() {
+            pane.selected_line = Some(target_idx);
+        }
+    }
+
+    /// Clear line selection
+    pub fn clear_selection(&mut self) {
+        self.panes[self.active_pane].selected_line = None;
     }
 
     /// Available theme names in cycle order
@@ -1073,9 +1119,9 @@ impl<'a> AppState<'a> {
         format!("{}/bark_export_{}.log", self.export_dir, timestamp)
     }
 
-    /// Get the current source
-    pub fn current_source(&self) -> &LogSourceType {
-        &self.sources[self.current_source_idx]
+    /// Get the current source (if any)
+    pub fn current_source(&self) -> Option<&LogSourceType> {
+        self.sources.get(self.current_source_idx)
     }
 
     /// Add a new source at runtime
@@ -1123,9 +1169,32 @@ impl<'a> AppState<'a> {
 
     /// Cycle focus between panels
     pub fn cycle_focus(&mut self) {
-        if !self.show_side_panel {
+        // When focused on LogView with splits, cycle through panes first
+        if self.focused_panel == FocusedPanel::LogView && self.is_split() {
+            // If we're on pane 0, go to pane 1
+            if self.active_pane == 0 {
+                self.active_pane = 1;
+                return;
+            }
+            // If we're on pane 1 and side panel is visible, go to Sources
+            // Otherwise cycle back to pane 0
+            if self.show_side_panel {
+                self.active_pane = 0; // Reset to pane 0 when leaving LogView
+                self.focused_panel = FocusedPanel::Sources;
+            } else {
+                self.active_pane = 0;
+            }
             return;
         }
+
+        if !self.show_side_panel {
+            // No side panel - just cycle panes if split
+            if self.is_split() {
+                self.active_pane = if self.active_pane == 0 { 1 } else { 0 };
+            }
+            return;
+        }
+
         self.focused_panel = match self.focused_panel {
             FocusedPanel::LogView => FocusedPanel::Sources,
             FocusedPanel::Sources => FocusedPanel::Filters,
@@ -1133,115 +1202,68 @@ impl<'a> AppState<'a> {
         };
     }
 
-    /// Push a new log line into the buffer
-    pub fn push_line(&mut self, line: LogLine) {
-        // If buffer is full, remove oldest line
-        if self.lines.len() >= self.max_lines {
-            self.lines.pop_front();
-
-            // Adjust bookmark indices since all indices shifted by 1
-            // Remove bookmarks pointing to the evicted line (index 0)
-            self.panes[self.active_pane].bookmarks.retain_mut(|idx| {
-                if *idx == 0 {
-                    return false;
-                }
-                *idx -= 1;
-                true
-            });
-
-            // Incrementally adjust filtered indices instead of full recompute
-            // This is O(m) where m = filtered lines, vs O(n) for full recompute
-            self.panes[self.active_pane].filtered_indices.retain_mut(|idx| {
-                if *idx == 0 {
-                    return false;
-                }
-                *idx -= 1;
-                true
-            });
-
-            // Adjust scroll if it's now out of bounds
-            if !self.panes[self.active_pane].filtered_indices.is_empty() {
-                self.panes[self.active_pane].scroll = self.panes[self.active_pane].scroll.min(self.panes[self.active_pane].filtered_indices.len() - 1);
-            } else {
-                self.panes[self.active_pane].scroll = 0;
-            }
-        }
-
-        let line_index = self.lines.len();
-        self.lines.push_back(line);
-
-        // Check if the new line matches the filter
-        if self.matches_filter(line_index) {
-            self.panes[self.active_pane].filtered_indices.push(line_index);
-        }
-
-        // Auto-scroll if stick_to_bottom is enabled
-        // Scroll so the last line appears at the BOTTOM of the viewport
-        if self.panes[self.active_pane].stick_to_bottom && !self.panes[self.active_pane].filtered_indices.is_empty() {
-            self.panes[self.active_pane].scroll = self.panes[self.active_pane]
-                .filtered_indices
-                .len()
-                .saturating_sub(self.panes[self.active_pane].viewport_height);
-        }
-
-        // Update throughput tracking
-        self.track_throughput(1);
-    }
-
     /// Push multiple log lines efficiently (batched)
     /// Only updates scroll position once at the end
+    /// Updates ALL panes (not just active) so split view stays in sync
     pub fn push_lines(&mut self, lines: Vec<LogLine>) {
         let count = lines.len();
         if count == 0 {
             return;
         }
 
+        let num_panes = self.panes.len();
+
         for line in lines {
             // If buffer is full, remove oldest line
             if self.lines.len() >= self.max_lines {
                 self.lines.pop_front();
 
-                // Adjust bookmark indices
-                self.panes[self.active_pane].bookmarks.retain_mut(|idx| {
-                    if *idx == 0 {
-                        return false;
-                    }
-                    *idx -= 1;
-                    true
-                });
+                // Adjust bookmark and filtered indices for ALL panes
+                for pane in &mut self.panes {
+                    pane.bookmarks.retain_mut(|idx| {
+                        if *idx == 0 {
+                            return false;
+                        }
+                        *idx -= 1;
+                        true
+                    });
 
-                // Adjust filtered indices
-                self.panes[self.active_pane].filtered_indices.retain_mut(|idx| {
-                    if *idx == 0 {
-                        return false;
-                    }
-                    *idx -= 1;
-                    true
-                });
+                    pane.filtered_indices.retain_mut(|idx| {
+                        if *idx == 0 {
+                            return false;
+                        }
+                        *idx -= 1;
+                        true
+                    });
+                }
             }
 
             let line_index = self.lines.len();
             self.lines.push_back(line);
 
-            // Check if the new line matches the filter
-            if self.matches_filter(line_index) {
-                self.panes[self.active_pane].filtered_indices.push(line_index);
+            // Check if the new line matches the filter for EACH pane
+            for pane_idx in 0..num_panes {
+                if self.matches_filter_for_pane(pane_idx, line_index) {
+                    self.panes[pane_idx].filtered_indices.push(line_index);
+                }
             }
         }
 
-        // Update scroll only once at the end (not per line)
-        if self.panes[self.active_pane].stick_to_bottom && !self.panes[self.active_pane].filtered_indices.is_empty() {
-            self.panes[self.active_pane].scroll = self.panes[self.active_pane]
-                .filtered_indices
-                .len()
-                .saturating_sub(self.panes[self.active_pane].viewport_height);
-        }
+        // Update scroll for ALL panes
+        for pane in &mut self.panes {
+            if pane.stick_to_bottom && !pane.filtered_indices.is_empty() {
+                pane.scroll = pane
+                    .filtered_indices
+                    .len()
+                    .saturating_sub(pane.viewport_height);
+            }
 
-        // Adjust scroll if it's now out of bounds
-        if !self.panes[self.active_pane].filtered_indices.is_empty() {
-            self.panes[self.active_pane].scroll = self.panes[self.active_pane].scroll.min(self.panes[self.active_pane].filtered_indices.len() - 1);
-        } else {
-            self.panes[self.active_pane].scroll = 0;
+            // Adjust scroll if it's now out of bounds
+            if !pane.filtered_indices.is_empty() {
+                pane.scroll = pane.scroll.min(pane.filtered_indices.len() - 1);
+            } else {
+                pane.scroll = 0;
+            }
         }
 
         // Update throughput tracking
@@ -1261,15 +1283,25 @@ impl<'a> AppState<'a> {
         }
     }
 
-    /// Check if a line at the given index matches the current filter
+    /// Check if a line at the given index matches the current filter (active pane)
     fn matches_filter(&self, index: usize) -> bool {
+        self.matches_filter_for_pane(self.active_pane, index)
+    }
+
+    /// Check if a line at the given index matches the filter for a specific pane
+    fn matches_filter_for_pane(&self, pane_idx: usize, index: usize) -> bool {
         let line = match self.lines.get(index) {
             Some(l) => l,
             None => return false,
         };
 
+        let pane = match self.panes.get(pane_idx) {
+            Some(p) => p,
+            None => return false,
+        };
+
         // Check source visibility
-        if !self.panes[self.active_pane]
+        if !pane
             .visible_sources
             .get(line.source_id)
             .copied()
@@ -1279,14 +1311,14 @@ impl<'a> AppState<'a> {
         }
 
         // Check view mode
-        match self.panes[self.active_pane].view_mode {
+        match pane.view_mode {
             SourceViewMode::AllMerged => {}
             SourceViewMode::SingleSource(id) if id != line.source_id => return false,
             _ => {}
         }
 
         // Check text filter
-        match &self.panes[self.active_pane].active_filter {
+        match &pane.active_filter {
             None => true,
             Some(filter) => filter.matches(&line.raw),
         }
@@ -1490,37 +1522,6 @@ impl<'a> AppState<'a> {
                 "substring"
             }
         ));
-    }
-
-    /// Get visible lines for rendering (immutable references for safety)
-    pub fn visible_lines(&mut self, height: usize) -> Vec<(usize, &LogLine)> {
-        // Update viewport height and recalculate scroll if stick_to_bottom is enabled
-        // This fixes the initial render where viewport_height was default (20)
-        let height_changed = self.panes[self.active_pane].viewport_height != height;
-        self.panes[self.active_pane].viewport_height = height;
-
-        if self.panes[self.active_pane].filtered_indices.is_empty() {
-            return Vec::new();
-        }
-
-        // Recalculate scroll position if viewport height changed and we're sticking to bottom
-        if height_changed && self.panes[self.active_pane].stick_to_bottom {
-            self.panes[self.active_pane].scroll = self.panes[self.active_pane]
-                .filtered_indices
-                .len()
-                .saturating_sub(self.panes[self.active_pane].viewport_height);
-        }
-
-        let start = self.panes[self.active_pane].scroll;
-        let end = (start + height).min(self.panes[self.active_pane].filtered_indices.len());
-
-        self.panes[self.active_pane].filtered_indices[start..end]
-            .iter()
-            .enumerate()
-            .filter_map(|(i, &line_idx)| {
-                self.lines.get(line_idx).map(|line| (start + i, line))
-            })
-            .collect()
     }
 
     /// Get total and visible line counts

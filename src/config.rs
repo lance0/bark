@@ -164,8 +164,8 @@ mod tests {
     fn test_get_theme_default() {
         let config = Config::default();
         let theme = config.get_theme();
-        // Default theme uses Color::Red for errors
-        assert_eq!(theme.level_error, ratatui::style::Color::Red);
+        // Default theme uses RGB soft red for errors
+        assert_eq!(theme.level_error, ratatui::style::Color::Rgb(255, 85, 85));
     }
 
     #[test]

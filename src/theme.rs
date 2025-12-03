@@ -74,69 +74,69 @@ impl Default for Theme {
 }
 
 impl Theme {
-    /// The default theme (matches original hardcoded colors)
+    /// The default theme - modern dark with vibrant accents
     pub fn default_theme() -> Self {
         Self {
             name: "default",
 
-            // Log levels
-            level_error: Color::Red,
-            level_warn: Color::Yellow,
-            level_info: Color::Green,
-            level_debug: Color::Blue,
-            level_trace: Color::DarkGray,
+            // Log levels - vibrant but balanced
+            level_error: Color::Rgb(255, 85, 85),    // Soft red
+            level_warn: Color::Rgb(255, 184, 108),   // Warm orange
+            level_info: Color::Rgb(80, 250, 123),    // Bright green
+            level_debug: Color::Rgb(139, 233, 253),  // Cyan
+            level_trace: Color::Rgb(98, 114, 164),   // Muted purple-gray
 
             // UI borders
-            border_focused: Color::Cyan,
-            border_unfocused: Color::DarkGray,
+            border_focused: Color::Rgb(80, 250, 123),  // Bright green
+            border_unfocused: Color::Rgb(68, 71, 90),  // Subtle gray
 
             // Header
-            header_title: Color::Green,
-            header_source: Color::Cyan,
-            header_bg: Color::DarkGray,
+            header_title: Color::Rgb(80, 250, 123),    // Bright green
+            header_source: Color::Rgb(139, 233, 253),  // Cyan
+            header_bg: Color::Rgb(40, 42, 54),         // Dark purple-gray
 
             // Status bar
-            status_mode_bg: Color::Blue,
-            status_mode_fg: Color::White,
-            status_help: Color::DarkGray,
-            status_bg: Color::Black,
+            status_mode_bg: Color::Rgb(189, 147, 249), // Purple
+            status_mode_fg: Color::Rgb(40, 42, 54),    // Dark bg
+            status_help: Color::Rgb(98, 114, 164),     // Muted
+            status_bg: Color::Rgb(33, 34, 44),         // Darker bg
 
             // Highlights
-            highlight_match_bg: Color::Yellow,
-            highlight_match_fg: Color::Black,
+            highlight_match_bg: Color::Rgb(255, 184, 108), // Orange
+            highlight_match_fg: Color::Rgb(40, 42, 54),
 
             // Bookmarks
-            bookmark: Color::Magenta,
+            bookmark: Color::Rgb(255, 121, 198),  // Pink
 
             // Timestamps
-            timestamp: Color::DarkGray,
+            timestamp: Color::Rgb(98, 114, 164),  // Muted purple-gray
 
             // JSON
-            json: Color::Cyan,
+            json: Color::Rgb(139, 233, 253),      // Cyan
 
             // Filters
-            filter_selected: Color::Yellow,
-            filter_prefix: Color::Yellow,
+            filter_selected: Color::Rgb(255, 184, 108),
+            filter_prefix: Color::Rgb(189, 147, 249),  // Purple
 
             // Sources
-            source_current: Color::Green,
+            source_current: Color::Rgb(80, 250, 123),
 
             // Empty states
-            empty_state: Color::DarkGray,
-            warning_message: Color::Yellow,
+            empty_state: Color::Rgb(98, 114, 164),
+            warning_message: Color::Rgb(255, 184, 108),
 
             // Help
-            help_border: Color::Cyan,
-            help_bg: Color::Black,
+            help_border: Color::Rgb(189, 147, 249),  // Purple
+            help_bg: Color::Rgb(40, 42, 54),
 
             // Source colors for multi-source display
             source_colors: vec![
-                Color::Cyan,
-                Color::Yellow,
-                Color::Magenta,
-                Color::Green,
-                Color::Blue,
-                Color::LightRed,
+                Color::Rgb(139, 233, 253),  // Cyan
+                Color::Rgb(255, 184, 108),  // Orange
+                Color::Rgb(255, 121, 198),  // Pink
+                Color::Rgb(80, 250, 123),   // Green
+                Color::Rgb(189, 147, 249),  // Purple
+                Color::Rgb(241, 250, 140),  // Yellow
             ],
         }
     }
@@ -846,7 +846,7 @@ mod tests {
     #[test]
     fn test_by_name_default() {
         let theme = Theme::by_name("default");
-        assert_eq!(theme.level_error, Color::Red);
+        assert_eq!(theme.level_error, Color::Rgb(255, 85, 85));
     }
 
     #[test]

@@ -129,6 +129,21 @@
 - [x] Active pane indicator (highlighted border)
 - [x] Pane indicator in status bar (`[1/2]`, `[2/2]`)
 
+## Milestone 13: Discovery & Selection UX ✅
+
+- [x] Auto-discovery mode (`bark` with no args opens picker)
+- [x] `bark --docker` discovers all Docker containers
+- [x] `bark --k8s` discovers all K8s pods
+- [x] `bark --all` discovers all Docker + K8s sources
+- [x] Picker shows already-added sources as checked
+- [x] Deselect sources in picker to hide them
+- [x] Click-to-select lines for yanking
+  - [x] `▶` indicator on selected line
+  - [x] `y` yanks selected line
+  - [x] `Esc` clears selection
+  - [x] Click in split switches pane focus
+- [x] Tab cycles through split panes before sidebar
+
 ## Future Ideas
 - [ ] Log correlation/linking between sources
 - [ ] Named bookmark groups
