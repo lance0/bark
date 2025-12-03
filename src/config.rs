@@ -158,7 +158,10 @@ mod tests {
         config.theme = "dracula".to_string();
         let theme = config.get_theme();
         // Dracula uses RGB colors
-        assert!(matches!(theme.level_error, ratatui::style::Color::Rgb(_, _, _)));
+        assert!(matches!(
+            theme.level_error,
+            ratatui::style::Color::Rgb(_, _, _)
+        ));
     }
 
     #[test]

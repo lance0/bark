@@ -20,8 +20,16 @@ use crate::theme::Theme;
 
 const SIDE_PANEL_WIDTH: u16 = 24;
 
-/// Data for rendering a single log line: (raw, has_ansi, level_color, relative_time, is_json, is_bookmarked)
-type LineRenderData = (String, bool, Option<Color>, Option<String>, bool, bool);
+/// Data for rendering a single log line: (raw, has_ansi, level_color, relative_time, is_json, is_bookmarked, source_id)
+type LineRenderData = (
+    String,
+    bool,
+    Option<Color>,
+    Option<String>,
+    bool,
+    bool,
+    usize,
+);
 
 /// Get color for a log level from the theme
 fn get_level_color(level: &LogLevel, theme: &Theme) -> Option<Color> {
@@ -189,6 +197,8 @@ fn draw_side_panel(frame: &mut Frame, state: &AppState, area: Rect) {
 
 /// Draw the sources list
 fn draw_sources_panel(frame: &mut Frame, state: &AppState, area: Rect) {
+    use crate::app::SourceViewMode;
+
     let focused = state.focused_panel == FocusedPanel::Sources;
     let border_style = if focused {
         Style::default().fg(state.theme.border_focused)
@@ -196,8 +206,14 @@ fn draw_sources_panel(frame: &mut Frame, state: &AppState, area: Rect) {
         Style::default().fg(state.theme.border_unfocused)
     };
 
+    let title = if state.sources.len() > 1 {
+        " Sources (Space:toggle) "
+    } else {
+        " Sources "
+    };
+
     let block = Block::default()
-        .title(" Sources ")
+        .title(title)
         .borders(Borders::ALL)
         .border_style(border_style);
 
@@ -206,17 +222,38 @@ fn draw_sources_panel(frame: &mut Frame, state: &AppState, area: Rect) {
         .iter()
         .enumerate()
         .map(|(i, source)| {
-            let prefix = if i == state.current_source_idx {
-                "▶ "
+            let is_selected = i == state.current_source_idx;
+            let is_visible = state.visible_sources.get(i).copied().unwrap_or(true);
+            let is_solo = matches!(state.view_mode, SourceViewMode::SingleSource(id) if id == i);
+
+            let prefix = if is_selected { ">" } else { " " };
+            let visibility = if is_solo {
+                "[*]"
+            } else if is_visible {
+                "[x]"
             } else {
-                "  "
+                "[ ]"
             };
-            let style = if i == state.current_source_idx {
-                Style::default().fg(state.theme.source_current)
+
+            let color = state.theme.get_source_color(i);
+
+            // Truncate long names
+            let name = source.name();
+            let display_name = if name.len() > 12 {
+                format!("{}...", &name[..9])
             } else {
-                Style::default()
+                name
             };
-            ListItem::new(format!("{}{}", prefix, source.name())).style(style)
+
+            let style = if is_selected {
+                Style::default().fg(color).add_modifier(Modifier::BOLD)
+            } else if is_visible {
+                Style::default().fg(color)
+            } else {
+                Style::default().fg(state.theme.empty_state)
+            };
+
+            ListItem::new(format!("{} {} {}", prefix, visibility, display_name)).style(style)
         })
         .collect();
 
@@ -349,6 +386,7 @@ fn draw_log_view(frame: &mut Frame, state: &mut AppState, area: Rect) {
                 },
                 line.is_json,
                 is_bookmarked,
+                line.source_id,
             )
         })
         .collect();
@@ -357,7 +395,7 @@ fn draw_log_view(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let json_cache: Vec<Option<String>> = if json_pretty_enabled {
         line_data
             .iter()
-            .map(|(raw, _, _, _, is_json, _)| {
+            .map(|(raw, _, _, _, is_json, _, _)| {
                 if *is_json {
                     serde_json::from_str::<serde_json::Value>(raw)
                         .ok()
@@ -371,6 +409,9 @@ fn draw_log_view(frame: &mut Frame, state: &mut AppState, area: Rect) {
         vec![None; line_data.len()]
     };
 
+    // Check if we need to show source prefixes (only when multiple sources)
+    let show_source_prefix = state.sources.len() > 1;
+
     // Build the paragraph content with highlighting
     let mut lines_content: Vec<Line<'_>> = Vec::with_capacity(height);
     let h_scroll = if state.line_wrap {
@@ -379,7 +420,7 @@ fn draw_log_view(frame: &mut Frame, state: &mut AppState, area: Rect) {
         state.horizontal_scroll
     };
 
-    for (idx, (raw, has_ansi, level_color, relative_time, _is_json, is_bookmarked)) in
+    for (idx, (raw, has_ansi, level_color, relative_time, _is_json, is_bookmarked, source_id)) in
         line_data.iter().enumerate()
     {
         // Check if we have pretty JSON for this line
@@ -388,6 +429,30 @@ fn draw_log_view(frame: &mut Frame, state: &mut AppState, area: Rect) {
             .and_then(|j| j.as_ref())
             .map(|s| s.as_str())
             .unwrap_or(raw);
+
+        // Build source prefix if multiple sources
+        let source_prefix: Option<Span> = if show_source_prefix {
+            let source_name = state
+                .sources
+                .get(*source_id)
+                .map(|s| {
+                    let name = s.name();
+                    // Truncate long names
+                    if name.len() > 10 {
+                        format!("{}...", &name[..7])
+                    } else {
+                        name
+                    }
+                })
+                .unwrap_or_else(|| "?".to_string());
+            let color = theme.get_source_color(*source_id);
+            Some(Span::styled(
+                format!("[{:>10}] ", source_name),
+                Style::default().fg(color),
+            ))
+        } else {
+            None
+        };
 
         // Build bookmark prefix if bookmarked
         let bookmark_prefix: Option<Span> = if *is_bookmarked {
@@ -435,9 +500,12 @@ fn draw_log_view(frame: &mut Frame, state: &mut AppState, area: Rect) {
                             )
                         };
 
-                        // Add prefixes (bookmark, time)
+                        // Add prefixes (source, bookmark, time)
                         if show_prefix {
                             let mut prefix_spans = Vec::new();
+                            if let Some(ref sp) = source_prefix {
+                                prefix_spans.push(sp.clone());
+                            }
                             if let Some(ref bm) = bookmark_prefix {
                                 prefix_spans.push(bm.clone());
                             }
@@ -460,6 +528,9 @@ fn draw_log_view(frame: &mut Frame, state: &mut AppState, area: Rect) {
                     let mut line = Line::from(scrolled);
                     if show_prefix {
                         let mut prefix_spans = Vec::new();
+                        if let Some(ref sp) = source_prefix {
+                            prefix_spans.push(sp.clone());
+                        }
                         if let Some(ref bm) = bookmark_prefix {
                             prefix_spans.push(bm.clone());
                         }
@@ -518,9 +589,12 @@ fn draw_log_view(frame: &mut Frame, state: &mut AppState, area: Rect) {
                 let mut highlighted_line =
                     highlight_matches(&scrolled, &matches, base_style, &theme);
 
-                // Add prefixes (bookmark, time) - only on first line
+                // Add prefixes (source, bookmark, time) - only on first line
                 if show_prefix {
                     let mut prefix_spans = Vec::new();
+                    if let Some(ref sp) = source_prefix {
+                        prefix_spans.push(sp.clone());
+                    }
                     if let Some(ref bm) = bookmark_prefix {
                         prefix_spans.push(bm.clone());
                     }

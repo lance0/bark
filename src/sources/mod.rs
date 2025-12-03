@@ -9,6 +9,7 @@
 pub mod docker;
 pub mod file;
 pub mod k8s;
+pub mod manager;
 pub mod ssh;
 
 use crate::app::LogLine;
@@ -63,6 +64,12 @@ pub enum LogEvent {
     Line(LogLine),
     Error(String),
     EndOfStream,
+}
+
+/// Event with source identification for multi-source merging
+pub struct SourcedLogEvent {
+    pub source_id: usize,
+    pub event: LogEvent,
 }
 
 /// Trait for log sources

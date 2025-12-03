@@ -48,6 +48,7 @@ pub struct Theme {
     pub filter_prefix: Color,
 
     // Sources panel
+    #[allow(dead_code)]
     pub source_current: Color,
 
     // Empty states / messages
@@ -57,6 +58,9 @@ pub struct Theme {
     // Help overlay
     pub help_border: Color,
     pub help_bg: Color,
+
+    // Source colors (for multi-source display)
+    pub source_colors: Vec<Color>,
 }
 
 impl Default for Theme {
@@ -118,6 +122,16 @@ impl Theme {
             // Help
             help_border: Color::Cyan,
             help_bg: Color::Black,
+
+            // Source colors for multi-source display
+            source_colors: vec![
+                Color::Cyan,
+                Color::Yellow,
+                Color::Magenta,
+                Color::Green,
+                Color::Blue,
+                Color::LightRed,
+            ],
         }
     }
 
@@ -173,6 +187,16 @@ impl Theme {
             // Help
             help_border: Color::Rgb(255, 182, 214),
             help_bg: Color::Rgb(40, 30, 50),
+
+            // Source colors - pastel rainbow
+            source_colors: vec![
+                Color::Rgb(255, 182, 214), // Pink
+                Color::Rgb(182, 255, 214), // Mint
+                Color::Rgb(182, 214, 255), // Light blue
+                Color::Rgb(255, 214, 182), // Peach
+                Color::Rgb(214, 182, 255), // Lavender
+                Color::Rgb(255, 255, 182), // Cream yellow
+            ],
         }
     }
 
@@ -228,6 +252,16 @@ impl Theme {
             // Help
             help_border: Color::Rgb(0, 255, 255),
             help_bg: Color::Rgb(10, 10, 20),
+
+            // Source colors - neon palette
+            source_colors: vec![
+                Color::Rgb(0, 255, 255),   // Cyan
+                Color::Rgb(255, 0, 255),   // Magenta
+                Color::Rgb(0, 255, 150),   // Neon green
+                Color::Rgb(255, 200, 0),   // Yellow
+                Color::Rgb(0, 200, 255),   // Electric blue
+                Color::Rgb(255, 100, 100), // Neon red
+            ],
         }
     }
 
@@ -283,6 +317,16 @@ impl Theme {
             // Help
             help_border: Color::Rgb(189, 147, 249),
             help_bg: Color::Rgb(40, 42, 54),
+
+            // Source colors - Dracula palette
+            source_colors: vec![
+                Color::Rgb(139, 233, 253), // Cyan
+                Color::Rgb(255, 121, 198), // Pink
+                Color::Rgb(80, 250, 123),  // Green
+                Color::Rgb(255, 184, 108), // Orange
+                Color::Rgb(189, 147, 249), // Purple
+                Color::Rgb(241, 250, 140), // Yellow
+            ],
         }
     }
 
@@ -338,6 +382,16 @@ impl Theme {
             // Help
             help_border: Color::Rgb(180, 180, 180),
             help_bg: Color::Rgb(20, 20, 20),
+
+            // Source colors - varying grays
+            source_colors: vec![
+                Color::Rgb(220, 220, 220),
+                Color::Rgb(180, 180, 180),
+                Color::Rgb(140, 140, 140),
+                Color::Rgb(200, 200, 200),
+                Color::Rgb(160, 160, 160),
+                Color::Rgb(240, 240, 240),
+            ],
         }
     }
 
@@ -350,6 +404,11 @@ impl Theme {
             "dracula" => Self::dracula(),
             _ => Self::default_theme(),
         }
+    }
+
+    /// Get the color for a source by index (cycles through available colors)
+    pub fn get_source_color(&self, source_id: usize) -> Color {
+        self.source_colors[source_id % self.source_colors.len()]
     }
 }
 

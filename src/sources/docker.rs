@@ -39,19 +39,21 @@ impl LogSource for DockerSource {
                     let tx_stderr = tx.clone();
 
                     // Spawn task to read stderr
-                    let stderr_handle = if let Some(stderr) = child.stderr.take() {
-                        Some(tokio::spawn(async move {
+                    let stderr_handle = child.stderr.take().map(|stderr| {
+                        tokio::spawn(async move {
                             let reader = BufReader::new(stderr);
                             let mut lines = reader.lines();
                             while let Ok(Some(line)) = lines.next_line().await {
-                                if tx_stderr.send(LogEvent::Line(LogLine::new(line))).await.is_err() {
+                                if tx_stderr
+                                    .send(LogEvent::Line(LogLine::new(line)))
+                                    .await
+                                    .is_err()
+                                {
                                     break;
                                 }
                             }
-                        }))
-                    } else {
-                        None
-                    };
+                        })
+                    });
 
                     // Read stdout in main task
                     if let Some(stdout) = child.stdout.take() {

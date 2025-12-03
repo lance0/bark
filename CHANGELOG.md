@@ -2,6 +2,26 @@
 
 All notable changes to Bark will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **Multi-source support** - View logs from multiple containers/pods simultaneously
+  - CLI: `bark --docker nginx --docker redis` or `bark --k8s frontend --k8s backend`
+  - Mixed sources: `bark /var/log/app.log --docker nginx`
+- **Source visibility controls** in Sources panel
+  - `Space` - Toggle source visibility
+  - `v` - Solo view (show only selected source)
+  - `a` - Show all sources
+- **Source-colored log prefixes** - Each source gets a unique color in merged view
+- **Per-theme source color palettes** - All 5 themes have matching source colors
+- **SourceManager** for merging multiple async log streams
+
+### Changed
+- AppState now accepts multiple sources at initialization
+- Event loop handles multiplexed SourcedLogEvent from all sources
+- Sources panel shows `[x]/[ ]` visibility toggles
+- CLI help updated with multi-source examples
+
 ## [1.0.0] - 2025-12-02
 
 ### Added

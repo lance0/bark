@@ -39,7 +39,9 @@ impl LogSource for K8sSource {
 
         tokio::spawn(async move {
             let mut cmd = Command::new("kubectl");
-            cmd.arg("logs").arg("-f").arg(format!("--tail={}", DEFAULT_TAIL_LINES));
+            cmd.arg("logs")
+                .arg("-f")
+                .arg(format!("--tail={}", DEFAULT_TAIL_LINES));
 
             if let Some(ns) = namespace {
                 cmd.arg("-n").arg(ns);

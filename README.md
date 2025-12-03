@@ -9,6 +9,7 @@ A fast, keyboard-driven TUI for exploring logs from files, Docker containers, Ku
 ## Features
 
 - **Multiple log sources**: Local files, Docker containers, Kubernetes pods, SSH remote files
+- **Multi-source aggregation**: View logs from multiple containers/pods in one merged timeline
 - **Real-time streaming**: Auto-follows new log lines with smart scroll behavior
 - **Powerful filtering**: Substring and regex filtering with live preview
 - **Search highlighting**: Matching text highlighted, navigate with n/N
@@ -58,6 +59,11 @@ bark --k8s my-pod -n my-namespace -c my-container
 
 # Tail a remote file via SSH
 bark --ssh user@host /var/log/app.log
+
+# Multiple sources (logs merged chronologically)
+bark --docker nginx --docker redis --docker postgres
+bark --k8s frontend --k8s backend -n production
+bark /var/log/app.log --docker nginx
 ```
 
 ## Keyboard Shortcuts
@@ -97,6 +103,14 @@ bark --ssh user@host /var/log/app.log
 | `Tab` | Cycle panel focus |
 | `?` | Show help |
 | `q` | Quit |
+
+### Sources (when focused on Sources panel)
+| Key | Action |
+|-----|--------|
+| `j` / `k` | Navigate sources |
+| `Space` | Toggle source visibility |
+| `v` | Solo view (show only selected) |
+| `a` | Show all sources |
 
 ## Configuration
 

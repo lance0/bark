@@ -5,7 +5,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use tui_textarea::Input;
 
-use crate::app::{AppState, FocusedPanel, InputMode};
+use crate::app::{AppState, FocusedPanel, InputMode, SourceViewMode};
 use crate::config::MOUSE_SCROLL_LINES;
 
 /// Handle a mouse event
@@ -126,6 +126,55 @@ fn handle_normal_mode(state: &mut AppState, key: KeyEvent, page_size: usize) {
         KeyCode::Enter => {
             if state.focused_panel == FocusedPanel::Filters && !state.saved_filters.is_empty() {
                 state.apply_saved_filter(state.selected_filter_idx);
+            }
+        }
+
+        // Space - toggle source visibility (in Sources panel)
+        KeyCode::Char(' ') => {
+            if state.focused_panel == FocusedPanel::Sources {
+                let idx = state.current_source_idx;
+                if let Some(visible) = state.visible_sources.get_mut(idx) {
+                    *visible = !*visible;
+                }
+                let is_visible = state.visible_sources.get(idx).copied().unwrap_or(true);
+                state.recompute_filter();
+                let source_name = state.sources[idx].name();
+                state.status_message = Some(format!(
+                    "{} {}",
+                    source_name,
+                    if is_visible { "shown" } else { "hidden" }
+                ));
+            }
+        }
+
+        // 'v' - solo view (show only selected source) or toggle back to all
+        KeyCode::Char('v') => {
+            if state.focused_panel == FocusedPanel::Sources {
+                state.view_mode = match state.view_mode {
+                    SourceViewMode::SingleSource(id) if id == state.current_source_idx => {
+                        SourceViewMode::AllMerged
+                    }
+                    _ => SourceViewMode::SingleSource(state.current_source_idx),
+                };
+                state.recompute_filter();
+                state.status_message = Some(match state.view_mode {
+                    SourceViewMode::AllMerged => "Showing all sources".to_string(),
+                    SourceViewMode::SingleSource(id) => {
+                        format!("Solo: {}", state.sources[id].name())
+                    }
+                });
+            }
+        }
+
+        // 'a' - show all sources
+        KeyCode::Char('a') => {
+            if state.focused_panel == FocusedPanel::Sources {
+                for v in state.visible_sources.iter_mut() {
+                    *v = true;
+                }
+                state.view_mode = SourceViewMode::AllMerged;
+                state.recompute_filter();
+                state.status_message = Some("All sources visible".to_string());
             }
         }
 

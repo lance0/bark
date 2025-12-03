@@ -132,6 +132,8 @@ pub struct LogLine {
     pub timestamp: Option<DateTime<Local>>,
     /// Whether this line is valid JSON
     pub is_json: bool,
+    /// Index of the source this line came from
+    pub source_id: usize,
 }
 
 impl LogLine {
@@ -146,7 +148,14 @@ impl LogLine {
             has_ansi,
             timestamp,
             is_json,
+            source_id: 0,
         }
+    }
+
+    /// Set the source ID for this line
+    pub fn with_source_id(mut self, source_id: usize) -> Self {
+        self.source_id = source_id;
+        self
     }
 
     /// Detect if a line is JSON
@@ -182,6 +191,16 @@ pub enum FocusedPanel {
     Filters,
 }
 
+/// View mode for multi-source display
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum SourceViewMode {
+    /// Show all visible sources merged chronologically
+    #[default]
+    AllMerged,
+    /// Show only a single source
+    SingleSource(usize),
+}
+
 /// Main application state
 pub struct AppState<'a> {
     /// Ring buffer of log lines
@@ -204,6 +223,10 @@ pub struct AppState<'a> {
     pub sources: Vec<LogSourceType>,
     /// Index of current/selected source
     pub current_source_idx: usize,
+    /// Which sources are currently visible (by index)
+    pub visible_sources: Vec<bool>,
+    /// View mode: show all sources merged or single source only
+    pub view_mode: SourceViewMode,
     /// Saved filters
     pub saved_filters: Vec<SavedFilter>,
     /// Selected saved filter index (for navigation)
@@ -245,11 +268,13 @@ pub struct AppState<'a> {
 }
 
 impl<'a> AppState<'a> {
-    pub fn new(config: &Config, source: LogSourceType) -> Self {
+    pub fn new(config: &Config, sources: Vec<LogSourceType>) -> Self {
         let mut textarea = TextArea::default();
         textarea.set_cursor_line_style(Style::default());
         textarea.set_placeholder_text("type to filter...");
         textarea.set_placeholder_style(Style::default().fg(Color::DarkGray));
+
+        let visible_sources = vec![true; sources.len()];
 
         Self {
             lines: VecDeque::with_capacity(config.max_lines),
@@ -260,8 +285,10 @@ impl<'a> AppState<'a> {
             filter_textarea: textarea,
             active_filter: None,
             filter_is_regex: false,
-            sources: vec![source],
+            sources,
             current_source_idx: 0,
+            visible_sources,
+            view_mode: SourceViewMode::default(),
             saved_filters: Vec::new(),
             selected_filter_idx: 0,
             focused_panel: FocusedPanel::LogView,
@@ -509,10 +536,11 @@ impl<'a> AppState<'a> {
         &self.sources[self.current_source_idx]
     }
 
-    /// Add a new source (future feature)
+    /// Add a new source at runtime
     #[allow(dead_code)]
     pub fn add_source(&mut self, source: LogSourceType) {
         self.sources.push(source);
+        self.visible_sources.push(true);
     }
 
     /// Save the current filter with a name
@@ -583,21 +611,41 @@ impl<'a> AppState<'a> {
         // Auto-scroll if stick_to_bottom is enabled
         // Scroll so the last line appears at the BOTTOM of the viewport
         if self.stick_to_bottom && !self.filtered_indices.is_empty() {
-            self.scroll = self.filtered_indices.len().saturating_sub(self.viewport_height);
+            self.scroll = self
+                .filtered_indices
+                .len()
+                .saturating_sub(self.viewport_height);
         }
     }
 
     /// Check if a line at the given index matches the current filter
     fn matches_filter(&self, index: usize) -> bool {
+        let line = match self.lines.get(index) {
+            Some(l) => l,
+            None => return false,
+        };
+
+        // Check source visibility
+        if !self
+            .visible_sources
+            .get(line.source_id)
+            .copied()
+            .unwrap_or(true)
+        {
+            return false;
+        }
+
+        // Check view mode
+        match self.view_mode {
+            SourceViewMode::AllMerged => {}
+            SourceViewMode::SingleSource(id) if id != line.source_id => return false,
+            _ => {}
+        }
+
+        // Check text filter
         match &self.active_filter {
             None => true,
-            Some(filter) => {
-                if let Some(line) = self.lines.get(index) {
-                    filter.matches(&line.raw)
-                } else {
-                    false
-                }
-            }
+            Some(filter) => filter.matches(&line.raw),
         }
     }
 
@@ -762,7 +810,9 @@ impl<'a> AppState<'a> {
     /// Check if debounce period has passed and recompute if needed
     pub fn check_filter_debounce(&mut self) {
         if let Some(last_change) = self.filter_last_change {
-            if last_change.elapsed().as_millis() >= FILTER_DEBOUNCE_MS && self.filter_needs_recompute {
+            if last_change.elapsed().as_millis() >= FILTER_DEBOUNCE_MS
+                && self.filter_needs_recompute
+            {
                 // Apply filter without changing mode
                 let input = self.filter_input();
                 if input.is_empty() {

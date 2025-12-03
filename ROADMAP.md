@@ -64,13 +64,23 @@
 - [x] README troubleshooting section
 - [x] CI workflow fix (main → master branch)
 
+## Milestone 7: Multi-Source Support 🚧
+
+- [x] Multiple sources via CLI (`--docker nginx --docker redis`)
+- [x] Source manager for merging multiple log streams
+- [x] Source identification on each log line
+- [x] Merged timeline view (all sources interleaved chronologically)
+- [x] Source visibility toggles (Space to toggle in Sources panel)
+- [x] Solo view mode (v to show only selected source)
+- [x] Show all sources (a key)
+- [x] Source-colored prefixes in log view
+- [x] Per-theme source color palettes
+- [ ] Runtime container discovery (D for Docker, K for K8s)
+- [ ] Container/pod picker UI with multi-select
+
 ## Future Ideas
 
-- [ ] Docker multi-container support (`--docker-all` to auto-discover running containers)
 - [ ] Multiple panes (split view)
-- [ ] Multiple source switching at runtime (Tab/s to cycle sources)
-- [ ] Kubernetes pod selector UI
-- [ ] Log aggregation from multiple sources
 - [ ] Log correlation/linking between sources
 - [ ] Search history
 - [ ] Named bookmark groups

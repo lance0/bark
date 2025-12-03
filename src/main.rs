@@ -20,7 +20,15 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 
 use app::AppState;
 use config::Config;
-use sources::{LogEvent, LogSource, LogSourceType, file::FileSource};
+use sources::{
+    LogEvent, LogSource, LogSourceType, SourcedLogEvent, file::FileSource, manager::SourceManager,
+};
+
+/// Parsed source with its type and implementation
+struct ParsedSource {
+    source_type: LogSourceType,
+    source: Box<dyn LogSource>,
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -43,102 +51,42 @@ async fn main() -> Result<()> {
     }
 
     if args.len() < 2 {
-        eprintln!("Usage: bark <file_path>");
-        eprintln!("       bark --docker <container_name>");
-        eprintln!("       bark --k8s <pod_name> [-n namespace] [-c container]");
+        eprintln!("Usage: bark <file_path> [additional sources...]");
+        eprintln!("       bark --docker <container> [--docker <container2> ...]");
+        eprintln!("       bark --k8s <pod> [-n namespace] [-c container] [--k8s <pod2> ...]");
         eprintln!("       bark --ssh <host> <remote_path>");
+        eprintln!("\nMultiple sources can be combined:");
+        eprintln!("       bark --docker nginx --docker redis");
+        eprintln!("       bark /var/log/app.log --docker nginx");
         eprintln!("\nRun 'bark --help' for more information.");
         std::process::exit(1);
     }
 
-    let (source_type, source): (LogSourceType, Box<dyn LogSource>) = if args[1] == "--docker" {
-        if args.len() < 3 {
-            eprintln!("Usage: bark --docker <container_name>");
-            std::process::exit(1);
-        }
-        let container = args[2].clone();
-        (
-            LogSourceType::Docker {
-                container: container.clone(),
-            },
-            Box::new(sources::docker::DockerSource::new(container)),
-        )
-    } else if args[1] == "--k8s" {
-        if args.len() < 3 {
-            eprintln!("Usage: bark --k8s <pod_name> [-n namespace] [-c container]");
-            std::process::exit(1);
-        }
-        let pod = args[2].clone();
-        let mut namespace: Option<String> = None;
-        let mut container: Option<String> = None;
+    // Parse all sources from command line
+    let parsed_sources = parse_sources(&args)?;
 
-        // Parse optional arguments
-        let mut i = 3;
-        while i < args.len() {
-            match args[i].as_str() {
-                "-n" | "--namespace" => {
-                    if i + 1 < args.len() {
-                        namespace = Some(args[i + 1].clone());
-                        i += 2;
-                    } else {
-                        eprintln!("Missing namespace after -n");
-                        std::process::exit(1);
-                    }
-                }
-                "-c" | "--container" => {
-                    if i + 1 < args.len() {
-                        container = Some(args[i + 1].clone());
-                        i += 2;
-                    } else {
-                        eprintln!("Missing container after -c");
-                        std::process::exit(1);
-                    }
-                }
-                _ => {
-                    eprintln!("Unknown argument: {}", args[i]);
-                    std::process::exit(1);
-                }
-            }
-        }
-
-        (
-            LogSourceType::K8s {
-                pod: pod.clone(),
-                namespace: namespace.clone(),
-                container: container.clone(),
-            },
-            Box::new(sources::k8s::K8sSource::new(pod, namespace, container)),
-        )
-    } else if args[1] == "--ssh" {
-        if args.len() < 4 {
-            eprintln!("Usage: bark --ssh <host> <remote_path>");
-            std::process::exit(1);
-        }
-        let host = args[2].clone();
-        let path = args[3].clone();
-        (
-            LogSourceType::Ssh {
-                host: host.clone(),
-                path: path.clone(),
-            },
-            Box::new(sources::ssh::SshSource::new(host, path)),
-        )
-    } else {
-        let path = PathBuf::from(&args[1]);
-        (
-            LogSourceType::File { path: path.clone() },
-            Box::new(FileSource::new(path)),
-        )
-    };
+    if parsed_sources.is_empty() {
+        eprintln!("No valid sources specified. Run 'bark --help' for usage.");
+        std::process::exit(1);
+    }
 
     // Load config
     let config = Config::from_env();
 
-    // Initialize state
-    let mut state = AppState::new(&config, source_type);
+    // Extract source types for AppState
+    let source_types: Vec<LogSourceType> = parsed_sources
+        .iter()
+        .map(|p| p.source_type.clone())
+        .collect();
 
-    // Start the log source stream
-    let mut log_rx = source.stream().await;
+    // Initialize state
+    let mut state = AppState::new(&config, source_types);
+
+    // Create source manager and add all sources
+    let (mut source_manager, mut event_rx) = SourceManager::new(1000);
+    for (idx, parsed) in parsed_sources.into_iter().enumerate() {
+        source_manager.add_source(idx, parsed.source).await;
+    }
 
     // Setup terminal
     enable_raw_mode()?;
@@ -156,7 +104,10 @@ async fn main() -> Result<()> {
     }));
 
     // Main event loop
-    let result = run_event_loop(&mut terminal, &mut state, &mut log_rx).await;
+    let result = run_event_loop(&mut terminal, &mut state, &mut event_rx).await;
+
+    // Clean up source manager
+    drop(source_manager);
 
     // Restore terminal
     disable_raw_mode()?;
@@ -169,6 +120,92 @@ async fn main() -> Result<()> {
     result
 }
 
+/// Parse command line arguments into sources
+fn parse_sources(args: &[String]) -> Result<Vec<ParsedSource>> {
+    let mut sources: Vec<ParsedSource> = Vec::new();
+    let mut i = 1;
+
+    while i < args.len() {
+        match args[i].as_str() {
+            "--docker" => {
+                if i + 1 >= args.len() {
+                    anyhow::bail!("--docker requires a container name");
+                }
+                let container = args[i + 1].clone();
+                sources.push(ParsedSource {
+                    source_type: LogSourceType::Docker {
+                        container: container.clone(),
+                    },
+                    source: Box::new(sources::docker::DockerSource::new(container)),
+                });
+                i += 2;
+            }
+            "--k8s" => {
+                if i + 1 >= args.len() {
+                    anyhow::bail!("--k8s requires a pod name");
+                }
+                let pod = args[i + 1].clone();
+                let mut namespace: Option<String> = None;
+                let mut container: Option<String> = None;
+                i += 2;
+
+                // Parse optional -n and -c following this --k8s
+                while i < args.len() {
+                    match args[i].as_str() {
+                        "-n" | "--namespace" if i + 1 < args.len() => {
+                            namespace = Some(args[i + 1].clone());
+                            i += 2;
+                        }
+                        "-c" | "--container" if i + 1 < args.len() => {
+                            container = Some(args[i + 1].clone());
+                            i += 2;
+                        }
+                        // Stop at next source or unknown arg
+                        _ => break,
+                    }
+                }
+
+                sources.push(ParsedSource {
+                    source_type: LogSourceType::K8s {
+                        pod: pod.clone(),
+                        namespace: namespace.clone(),
+                        container: container.clone(),
+                    },
+                    source: Box::new(sources::k8s::K8sSource::new(pod, namespace, container)),
+                });
+            }
+            "--ssh" => {
+                if i + 2 >= args.len() {
+                    anyhow::bail!("--ssh requires <host> <remote_path>");
+                }
+                let host = args[i + 1].clone();
+                let path = args[i + 2].clone();
+                sources.push(ParsedSource {
+                    source_type: LogSourceType::Ssh {
+                        host: host.clone(),
+                        path: path.clone(),
+                    },
+                    source: Box::new(sources::ssh::SshSource::new(host, path)),
+                });
+                i += 3;
+            }
+            path if !path.starts_with('-') => {
+                let path = PathBuf::from(path);
+                sources.push(ParsedSource {
+                    source_type: LogSourceType::File { path: path.clone() },
+                    source: Box::new(FileSource::new(path)),
+                });
+                i += 1;
+            }
+            unknown => {
+                anyhow::bail!("Unknown argument: {}", unknown);
+            }
+        }
+    }
+
+    Ok(sources)
+}
+
 fn print_help() {
     println!(
         "bark {} - A keyboard-driven TUI for exploring logs",
@@ -176,9 +213,9 @@ fn print_help() {
     );
     println!();
     println!("USAGE:");
-    println!("    bark <file_path>");
-    println!("    bark --docker <container_name>");
-    println!("    bark --k8s <pod_name> [-n namespace] [-c container]");
+    println!("    bark <file_path> [additional sources...]");
+    println!("    bark --docker <container> [--docker <container2> ...]");
+    println!("    bark --k8s <pod> [-n namespace] [-c container] [--k8s <pod2> ...]");
     println!("    bark --ssh <host> <remote_path>");
     println!();
     println!("OPTIONS:");
@@ -194,7 +231,10 @@ fn print_help() {
     println!("EXAMPLES:");
     println!("    bark /var/log/syslog");
     println!("    bark --docker nginx");
+    println!("    bark --docker nginx --docker redis     # Multiple containers");
     println!("    bark --k8s my-app -n production");
+    println!("    bark --k8s frontend --k8s backend      # Multiple pods");
+    println!("    bark /var/log/app.log --docker nginx   # Mixed sources");
     println!("    bark --ssh user@server /var/log/app.log");
     println!();
     println!("KEYBOARD SHORTCUTS:");
@@ -207,6 +247,9 @@ fn print_help() {
     println!("    t                Toggle relative time");
     println!("    J                Toggle JSON pretty-print");
     println!("    w                Toggle line wrap");
+    println!("    b                Toggle side panel");
+    println!("    Tab              Cycle panel focus");
+    println!("    Space            Toggle source visibility (in Sources panel)");
     println!("    e                Export filtered lines");
     println!("    ?                Show full help");
     println!("    q                Quit");
@@ -226,7 +269,7 @@ fn print_help() {
 async fn run_event_loop<'a>(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     state: &mut AppState<'a>,
-    log_rx: &mut tokio::sync::mpsc::Receiver<LogEvent>,
+    event_rx: &mut tokio::sync::mpsc::Receiver<SourcedLogEvent>,
 ) -> Result<()> {
     loop {
         // Check filter debounce before drawing
@@ -261,17 +304,27 @@ async fn run_event_loop<'a>(
                 }
             }
 
-            // Check for new log lines
-            Some(event) = log_rx.recv() => {
-                match event {
+            // Check for new log lines from any source
+            Some(sourced_event) = event_rx.recv() => {
+                match sourced_event.event {
                     LogEvent::Line(line) => {
+                        // Set source_id on the line before pushing
+                        let line = line.with_source_id(sourced_event.source_id);
                         state.push_line(line);
                     }
                     LogEvent::Error(msg) => {
-                        state.status_message = Some(format!("Error: {}", msg));
+                        let source_name = state.sources
+                            .get(sourced_event.source_id)
+                            .map(|s| s.name())
+                            .unwrap_or_else(|| "unknown".to_string());
+                        state.status_message = Some(format!("[{}] Error: {}", source_name, msg));
                     }
                     LogEvent::EndOfStream => {
-                        state.status_message = Some("Stream ended".to_string());
+                        let source_name = state.sources
+                            .get(sourced_event.source_id)
+                            .map(|s| s.name())
+                            .unwrap_or_else(|| "unknown".to_string());
+                        state.status_message = Some(format!("[{}] Stream ended", source_name));
                     }
                 }
             }
