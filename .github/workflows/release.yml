@@ -66,21 +66,21 @@ jobs:
         if: matrix.os != 'windows-latest'
         run: |
           cd target/${{ matrix.target }}/release
-          tar czvf ../../../bark-${{ matrix.target }}.${{ matrix.archive }} bark
+          tar czvf ../../../barklog-${{ matrix.target }}.${{ matrix.archive }} barklog
           cd ../../..
 
       - name: Package (Windows)
         if: matrix.os == 'windows-latest'
         run: |
           cd target/${{ matrix.target }}/release
-          7z a ../../../bark-${{ matrix.target }}.${{ matrix.archive }} bark.exe
+          7z a ../../../barklog-${{ matrix.target }}.${{ matrix.archive }} barklog.exe
           cd ../../..
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bark-${{ matrix.target }}
-          path: bark-${{ matrix.target }}.${{ matrix.archive }}
+          name: barklog-${{ matrix.target }}
+          path: barklog-${{ matrix.target }}.${{ matrix.archive }}
 
   release:
     name: Create Release
