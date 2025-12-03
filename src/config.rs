@@ -61,7 +61,7 @@ impl Default for Config {
 impl Config {
     /// Get the config file path
     pub fn config_path() -> Option<PathBuf> {
-        dirs::config_dir().map(|p| p.join("bark").join("config.toml"))
+        dirs::config_dir().map(|p| p.join("barklog").join("config.toml"))
     }
 
     /// Load configuration from file, env vars, and defaults

@@ -131,10 +131,10 @@
 
 ## Milestone 13: Discovery & Selection UX ✅
 
-- [x] Auto-discovery mode (`bark` with no args opens picker)
-- [x] `bark --docker` discovers all Docker containers
-- [x] `bark --k8s` discovers all K8s pods
-- [x] `bark --all` discovers all Docker + K8s sources
+- [x] Auto-discovery mode (`barklog` with no args opens picker)
+- [x] `barklog --docker` discovers all Docker containers
+- [x] `barklog --k8s` discovers all K8s pods
+- [x] `barklog --all` discovers all Docker + K8s sources
 - [x] Picker shows already-added sources as checked
 - [x] Deselect sources in picker to hide them
 - [x] Click-to-select lines for yanking

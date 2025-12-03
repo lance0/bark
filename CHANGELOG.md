@@ -6,10 +6,10 @@ All notable changes to Bark will be documented in this file.
 
 ### Added
 - **Auto-discovery mode** - Start bark without arguments to open source picker immediately
-  - `bark` - Opens Docker picker to discover running containers
-  - `bark --docker` - Discovers all Docker containers (no name required)
-  - `bark --k8s` - Discovers all Kubernetes pods (no pod name required)
-  - `bark --all` - Discovers all Docker containers and K8s pods
+  - `barklog` - Opens Docker picker to discover running containers
+  - `barklog --docker` - Discovers all Docker containers (no name required)
+  - `barklog --k8s` - Discovers all Kubernetes pods (no pod name required)
+  - `barklog --all` - Discovers all Docker containers and K8s pods
 - **Click-to-select lines** - Click on any log line to select it for yanking
   - Selected line shows `▶` indicator
   - `y` yanks the selected line (or top visible line if none selected)
@@ -20,8 +20,8 @@ All notable changes to Bark will be documented in this file.
   - Uncheck and press Enter to hide sources from view
   - Press Enter without toggling to add highlighted item
 - **Multi-source support** - View logs from multiple containers/pods simultaneously
-  - CLI: `bark --docker nginx --docker redis` or `bark --k8s frontend --k8s backend`
-  - Mixed sources: `bark /var/log/app.log --docker nginx`
+  - CLI: `barklog --docker nginx --docker redis` or `barklog --k8s frontend --k8s backend`
+  - Mixed sources: `barklog /var/log/app.log --docker nginx`
 - **Runtime source discovery** - Add containers/pods while running
   - `D` - Open Docker container picker (lists running containers)
   - `K` - Open Kubernetes pod picker (lists pods across namespaces)

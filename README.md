@@ -1,25 +1,25 @@
-# bark
+# barklog
 
 A fast, keyboard-driven TUI for tailing logs from files, Docker, Kubernetes, and SSH servers.
 
 [![CI](https://github.com/lance0/bark/actions/workflows/ci.yml/badge.svg)](https://github.com/lance0/bark/actions/workflows/ci.yml)
-[![Crates.io](https://img.shields.io/crates/v/bark.svg)](https://crates.io/crates/bark)
+[![Crates.io](https://img.shields.io/crates/v/barklog.svg)](https://crates.io/crates/barklog)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE-MIT)
 
-![bark screenshot](screenshot.png)
+![barklog screenshot](screenshot.png)
 
 ## Quick Start
 
 ```bash
-cargo install bark
+cargo install barklog
 
 # Opens picker to select containers
-bark
+barklog
 
 # Or specify sources directly
-bark /var/log/syslog
-bark --docker nginx
-bark --k8s my-pod -n production
+barklog /var/log/syslog
+barklog --docker nginx
+barklog --k8s my-pod -n production
 ```
 
 ## Features
@@ -40,11 +40,11 @@ bark --k8s my-pod -n production
 
 ```bash
 # From crates.io
-cargo install bark
+cargo install barklog
 
 # From source
 git clone https://github.com/lance0/bark.git
-cd bark && cargo build --release
+cd barklog && cargo build --release
 ```
 
 Pre-built binaries available at [GitHub Releases](https://github.com/lance0/bark/releases).
@@ -53,21 +53,21 @@ Pre-built binaries available at [GitHub Releases](https://github.com/lance0/bark
 
 ```bash
 # Auto-discovery (opens picker)
-bark                  # Discover Docker containers
-bark --docker         # Discover all Docker containers
-bark --k8s            # Discover all Kubernetes pods
-bark --all            # Discover all sources
+barklog                  # Discover Docker containers
+barklog --docker         # Discover all Docker containers
+barklog --k8s            # Discover all Kubernetes pods
+barklog --all            # Discover all sources
 
 # Direct sources
-bark /var/log/syslog
-bark --docker nginx
-bark --k8s my-pod
-bark --k8s my-pod -n namespace -c container
-bark --ssh user@host /var/log/app.log
+barklog /var/log/syslog
+barklog --docker nginx
+barklog --k8s my-pod
+barklog --k8s my-pod -n namespace -c container
+barklog --ssh user@host /var/log/app.log
 
 # Multiple sources (merged timeline)
-bark --docker nginx --docker redis
-bark /var/log/app.log --docker nginx
+barklog --docker nginx --docker redis
+barklog /var/log/app.log --docker nginx
 ```
 
 ## Key Bindings
@@ -119,7 +119,7 @@ In picker: `j`/`k` navigate, `Space` toggle, `Enter` confirm.
 
 ## Configuration
 
-`~/.config/bark/config.toml`:
+`~/.config/barklog/config.toml`:
 
 ```toml
 max_lines = 10000
